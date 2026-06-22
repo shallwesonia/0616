@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.venv/
+__pycache__/
+*.pyc
+data/state.json
+data/exports/*
+!data/exports/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
+.env
