@@ -4,15 +4,24 @@ import {
   ArrowLeft,
   Bot,
   Box,
+  CheckCircle2,
   ClipboardList,
+  Copy,
   Download,
+  Eye,
+  FileDown,
   Gauge,
+  ListChecks,
   Map,
   MessageSquareText,
+  Pause,
   Play,
   Radio,
+  RefreshCw,
+  RotateCcw,
   Route,
   Send,
+  SlidersHorizontal,
   Square,
   Workflow,
   Zap
@@ -24,6 +33,7 @@ import {
   createSimulationRun,
   createSimulationSnapshot,
   createSimulationTask,
+  createSimulationTasksBatch,
   createSimulationTaskFromTemplate,
   exportSimulationRun,
   getCurrentState,
@@ -37,8 +47,13 @@ import {
   getTaskTemplates,
   getTrace,
   injectSimulationEvent,
+  pauseSimulationRun,
+  recoverSimulationEvent,
+  replayRunMessage,
+  resumeSimulationRun,
   startSimulationRun,
-  stopSimulationRun
+  stopSimulationRun,
+  validateScenario
 } from "./lib/api";
 import type {
   CurrentState,
@@ -47,6 +62,7 @@ import type {
   Observation,
   RobotState,
   ScenarioSummary,
+  ScenarioValidationResponse,
   SimulationAction,
   SimulationRun,
   SimulationSnapshot,
@@ -63,10 +79,20 @@ const exceptionOptions = [
   { value: "action.failed", label: "动作失败", targetType: "robot" },
   { value: "path.blocked", label: "路径阻塞", targetType: "path" },
   { value: "interface.timeout", label: "接口超时", targetType: "interface" },
-  { value: "message.dropped", label: "消息丢失", targetType: "message" }
+  { value: "message.dropped", label: "消息丢失", targetType: "message" },
+  { value: "station.unavailable", label: "工位不可用", targetType: "station" },
+  { value: "resource.locked", label: "资源锁定", targetType: "resource" }
 ] as const;
 
-const messageFilters = ["All", "Command", "Ack", "Telemetry", "Event", "Alert"] as const;
+const messageFilters = ["All", "Command", "Ack", "Telemetry", "Event", "Alert", "Interface", "AgentDecision"] as const;
+
+const recoveryModes = [
+  { value: "manual", label: "手动恢复" },
+  { value: "retry", label: "重试恢复" },
+  { value: "reschedule", label: "重新调度" },
+  { value: "takeover", label: "人工接管" },
+  { value: "terminate_task", label: "终止任务" }
+] as const;
 
 export function SimulationDashboard() {
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
@@ -79,16 +105,28 @@ export function SimulationDashboard() {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [trace, setTrace] = useState<TraceResponse | null>(null);
+  const [scenarioValidation, setScenarioValidation] = useState<ScenarioValidationResponse | null>(null);
   const [socketState, setSocketState] = useState<"idle" | "open" | "fallback">("idle");
   const [selectedScenarioId, setSelectedScenarioId] = useState("default-site-a");
   const [templateId, setTemplateId] = useState("");
+  const [taskMode, setTaskMode] = useState<"manual" | "template" | "batch">("manual");
   const [taskGoal, setTaskGoal] = useState("搬运到分拣工位");
+  const [batchCount, setBatchCount] = useState(5);
+  const [commandMode, setCommandMode] = useState<"quick" | "advanced">("quick");
   const [command, setCommand] = useState<"goto_pose" | "where" | "stop">("goto_pose");
+  const [selectedRobotCode, setSelectedRobotCode] = useState("");
   const [targetX, setTargetX] = useState(760);
   const [targetY, setTargetY] = useState(420);
+  const [targetZ, setTargetZ] = useState(0);
+  const [targetYaw, setTargetYaw] = useState(0);
+  const [timeoutMs, setTimeoutMs] = useState(60000);
   const [messageFilter, setMessageFilter] = useState<(typeof messageFilters)[number]>("All");
+  const [selectedMessageId, setSelectedMessageId] = useState("");
   const [exceptionType, setExceptionType] = useState<(typeof exceptionOptions)[number]["value"]>("robot.offline");
   const [exceptionTarget, setExceptionTarget] = useState("robot-001");
+  const [exceptionDurationMs, setExceptionDurationMs] = useState(0);
+  const [exceptionAutoRecover, setExceptionAutoRecover] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState<(typeof recoveryModes)[number]["value"]>("manual");
   const [status, setStatus] = useState("仿真驾驶舱待连接");
 
   const selectedScenario = useMemo(
@@ -104,6 +142,19 @@ export function SimulationDashboard() {
     }
     return messages.filter((message) => messageCategory(message) === messageFilter);
   }, [messageFilter, messages]);
+  const selectedMessage = useMemo(
+    () => messages.find((message) => message.messageId === selectedMessageId) ?? filteredMessages[0] ?? null,
+    [filteredMessages, messages, selectedMessageId]
+  );
+  const effectiveRobotCode = selectedRobotCode || selectedScenario?.robotCodes[0] || robots[0]?.robotId || "robot-001";
+  const scenarioCheckSummary = useMemo(() => {
+    const checks = scenarioValidation?.checks ?? [];
+    return {
+      passed: checks.filter((check) => check.status === "passed").length,
+      warnings: checks.filter((check) => check.status === "warning").length,
+      failed: checks.filter((check) => check.status === "failed").length
+    };
+  }, [scenarioValidation]);
 
   async function bootstrap() {
     const [nextScenarios, nextTemplates, nextRuns] = await Promise.all([
@@ -115,12 +166,33 @@ export function SimulationDashboard() {
     setTemplates(nextTemplates);
     setRuns(nextRuns);
     setSelectedScenarioId(nextScenarios[0]?.scenarioId ?? "default-site-a");
+    setSelectedRobotCode(nextScenarios[0]?.robotCodes[0] ?? "");
     setTemplateId(nextTemplates[0]?.templateId ?? "");
+    if (nextScenarios[0]) {
+      await handleValidateScenario(nextScenarios[0].scenarioId, false);
+    }
     if (nextRuns[0]) {
       setRun(nextRuns[0]);
       await refreshRun(nextRuns[0].runId);
     }
     setStatus("已连接平台 API");
+  }
+
+  async function handleValidateScenario(scenarioId = selectedScenarioId, announce = true) {
+    try {
+      const validation = await validateScenario(scenarioId);
+      setScenarioValidation(validation);
+      if (announce) {
+        setStatus(validation.ok ? "场景完整性校验通过" : `场景校验存在 ${validation.issues.length} 个阻断问题`);
+      }
+      return validation;
+    } catch {
+      setScenarioValidation(null);
+      if (announce) {
+        setStatus("场景校验接口暂不可用");
+      }
+      return null;
+    }
   }
 
   async function refreshRun(runId: string) {
@@ -145,6 +217,15 @@ export function SimulationDashboard() {
   useEffect(() => {
     void bootstrap().catch((error) => setStatus(error instanceof Error ? error.message : "平台连接失败"));
   }, []);
+
+  useEffect(() => {
+    if (!selectedScenarioId) {
+      return;
+    }
+    const scenario = scenarios.find((item) => item.scenarioId === selectedScenarioId);
+    setSelectedRobotCode(scenario?.robotCodes[0] ?? "");
+    void handleValidateScenario(selectedScenarioId, false);
+  }, [selectedScenarioId, scenarios]);
 
   useEffect(() => {
     if (!run) {
@@ -191,6 +272,11 @@ export function SimulationDashboard() {
   }, [run, socketState]);
 
   async function handleCreateRun() {
+    const validation = await handleValidateScenario(selectedScenarioId, false);
+    if (validation && !validation.ok) {
+      setStatus(`场景校验未通过：${validation.issues[0]}`);
+      return;
+    }
     const nextRun = await createSimulationRun(selectedScenarioId, `${selectedScenario?.name ?? "Scenario"} Run`);
     const started = await startSimulationRun(nextRun.runId);
     setRun(started);
@@ -209,6 +295,26 @@ export function SimulationDashboard() {
     await refreshRun(stopped.runId);
   }
 
+  async function handlePauseRun() {
+    if (!run) {
+      return;
+    }
+    const paused = await pauseSimulationRun(run.runId);
+    setRun(paused);
+    setStatus(`已暂停运行 ${paused.runId}`);
+    await refreshRun(paused.runId);
+  }
+
+  async function handleResumeRun() {
+    if (!run) {
+      return;
+    }
+    const resumed = await resumeSimulationRun(run.runId);
+    setRun(resumed);
+    setStatus(`已恢复运行 ${resumed.runId}`);
+    await refreshRun(resumed.runId);
+  }
+
   async function handleCreateTask(useTemplate: boolean) {
     if (!run) {
       return;
@@ -216,14 +322,37 @@ export function SimulationDashboard() {
     const nextTask = useTemplate
       ? await createSimulationTaskFromTemplate(run.runId, templateId, {
           goal: taskGoal,
-          target: { x: targetX, y: targetY, z: 0, yaw: 0 }
+          target: commandTargetParams(targetX, targetY, targetZ, targetYaw)
         })
       : await createSimulationTask(run.runId, {
           goal: taskGoal,
-          input: { command: "goto_pose", target: { x: targetX, y: targetY, z: 0, yaw: 0 } },
+          input: { command: "goto_pose", target: commandTargetParams(targetX, targetY, targetZ, targetYaw) },
           priority: 5
         });
     setStatus(`已创建任务 ${nextTask.taskId}`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleCreateBatchTasks() {
+    if (!run) {
+      return;
+    }
+    const response = await createSimulationTasksBatch(run.runId, {
+      templateId: templateId || null,
+      goal: taskGoal,
+      count: batchCount,
+      intervalMs: 0,
+      priority: 5,
+      targetRange: { x: [Math.max(0, targetX - 80), targetX + 80], y: [Math.max(0, targetY - 80), targetY + 80] },
+      parameters: {
+        target: commandTargetParams(targetX, targetY, targetZ, targetYaw)
+      },
+      randomSeed: Date.now(),
+      randomizeRobot: true,
+      randomizeTaskType: false,
+      autoRun: false
+    });
+    setStatus(`批量任务已创建 ${response.createdCount}/${response.requestedCount}，批次 ${response.batchId}`);
     await refreshRun(run.runId);
   }
 
@@ -231,20 +360,47 @@ export function SimulationDashboard() {
     if (!run) {
       return;
     }
-    const robotCode = selectedScenario?.robotCodes[0] ?? robots[0]?.robotId ?? "robot-001";
-    const params = command === "goto_pose" ? { x: targetX, y: targetY, z: 0, yaw: 0 } : {};
+    const params = command === "goto_pose" ? commandTargetParams(targetX, targetY, targetZ, targetYaw) : {};
     const nextAction = await createSimulationAction({
       runId: run.runId,
       taskId: activeTask?.taskId,
       planId: activeTask?.activePlan?.planId,
       planStepId: activeTask?.activePlan?.steps[0]?.planStepId,
-      robotCode,
+      robotCode: effectiveRobotCode,
       command,
       params,
-      timeoutMs: 60000,
+      timeoutMs,
       operatorId: "simulation-console"
     });
     setStatus(`已下发 Action ${nextAction.actionId}`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleQuickAction(nextCommand: "goto_pose" | "where" | "stop", target?: { x: number; y: number }) {
+    if (target) {
+      setTargetX(Math.round(target.x));
+      setTargetY(Math.round(target.y));
+    }
+    setCommand(nextCommand);
+    if (!run) {
+      return;
+    }
+    const params =
+      nextCommand === "goto_pose"
+        ? commandTargetParams(target?.x ?? targetX, target?.y ?? targetY, targetZ, targetYaw)
+        : {};
+    const nextAction = await createSimulationAction({
+      runId: run.runId,
+      taskId: activeTask?.taskId,
+      planId: activeTask?.activePlan?.planId,
+      planStepId: activeTask?.activePlan?.steps[0]?.planStepId,
+      robotCode: effectiveRobotCode,
+      command: nextCommand,
+      params,
+      timeoutMs,
+      operatorId: "simulation-console"
+    });
+    setStatus(`快捷指令已下发 ${nextAction.command}`);
     await refreshRun(run.runId);
   }
 
@@ -259,10 +415,67 @@ export function SimulationDashboard() {
       targetId: exceptionTarget,
       severity: option.value === "robot.offline" ? "critical" : "error",
       data: { source: "simulation-dashboard" },
-      autoRecover: false
+      durationMs: exceptionDurationMs || null,
+      autoRecover: exceptionAutoRecover
     });
     setStatus(`已注入异常 ${option.label}`);
     await refreshRun(run.runId);
+  }
+
+  async function handleRecoverException() {
+    if (!run) {
+      return;
+    }
+    const option = exceptionOptions.find((item) => item.value === exceptionType) ?? exceptionOptions[0];
+    await recoverSimulationEvent(run.runId, {
+      eventType: option.value,
+      targetType: option.targetType,
+      targetId: exceptionTarget,
+      recoveryMode,
+      reason: "operator recovery",
+      operatorId: "simulation-console"
+    });
+    setStatus(`已执行异常恢复 ${option.label}`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleReplayMessage() {
+    if (!run || !selectedMessage) {
+      return;
+    }
+    const response = await replayRunMessage(run.runId, selectedMessage.messageId, {
+      replayMode: "single",
+      sandbox: true,
+      reason: "simulation cockpit replay"
+    });
+    setSelectedMessageId(response.message.messageId);
+    setStatus(`已沙箱重放消息 ${selectedMessage.messageId}`);
+    await refreshRun(run.runId);
+  }
+
+  function handleExportMessages() {
+    const payload = {
+      exportType: "simulation_messages_filtered",
+      runId: run?.runId,
+      filter: messageFilter,
+      createdAt: new Date().toISOString(),
+      messages: filteredMessages
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${run?.runId ?? "simulation"}-${messageFilter.toLowerCase()}-messages.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleCopyMessagePayload() {
+    if (!selectedMessage) {
+      return;
+    }
+    await navigator.clipboard.writeText(JSON.stringify(selectedMessage.payload, null, 2));
+    setStatus(`已复制消息 ${selectedMessage.messageId}`);
   }
 
   async function handleSnapshot() {
@@ -319,6 +532,14 @@ export function SimulationDashboard() {
               <Download size={16} />
               导出 Run
             </Button>
+            <Button variant="secondary" onClick={handlePauseRun} disabled={!run || run.status !== "Running"}>
+              <Pause size={16} />
+              暂停
+            </Button>
+            <Button variant="secondary" onClick={handleResumeRun} disabled={!run || run.status !== "Paused"}>
+              <RefreshCw size={16} />
+              恢复
+            </Button>
             <Button variant="danger" onClick={handleStopRun} disabled={!run || run.status !== "Running"}>
               <Square size={16} />
               停止
@@ -346,12 +567,36 @@ export function SimulationDashboard() {
                   <Play size={15} />
                   创建并启动 Run
                 </Button>
+                <Button variant="secondary" onClick={() => void handleValidateScenario()}>
+                  <CheckCircle2 size={15} />
+                  校验场景
+                </Button>
               </div>
               {selectedScenario && (
                 <div className="mt-4 grid gap-2 text-xs text-neutral-500">
                   <InfoRow label="地图" value={`${selectedScenario.siteMapId} / ${selectedScenario.siteMapVersion}`} />
                   <InfoRow label="机器人" value={selectedScenario.robotCodes.join(", ") || "-"} />
                   <InfoRow label="动作集" value={(selectedScenario.actionSet.commands ?? []).join(", ")} />
+                  <InfoRow
+                    label="完整性"
+                    value={
+                      scenarioValidation
+                        ? `${scenarioValidation.ok ? "通过" : "阻断"} / P${scenarioCheckSummary.passed} W${scenarioCheckSummary.warnings} F${scenarioCheckSummary.failed}`
+                        : "未校验"
+                    }
+                  />
+                </div>
+              )}
+              {scenarioValidation && (
+                <div className="mt-3 grid gap-2">
+                  {scenarioValidation.checks.slice(0, 4).map((check) => (
+                    <CompactRow
+                      key={check.code}
+                      label={check.label}
+                      value={check.status}
+                      tone={check.status === "passed" ? "green" : check.status === "warning" ? "amber" : "red"}
+                    />
+                  ))}
                 </div>
               )}
             </Panel>
@@ -359,6 +604,19 @@ export function SimulationDashboard() {
             <Panel className="p-4">
               <PanelTitle icon={ClipboardList} title="建任务" subtitle="手动创建或从模板生成" />
               <div className="mt-4 grid gap-3">
+                <div className="grid grid-cols-3 gap-1 rounded-lg border border-neutral-200 bg-neutral-50 p-1">
+                  {(["manual", "template", "batch"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={`h-8 rounded-md text-xs font-medium transition ${
+                        taskMode === mode ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+                      }`}
+                      onClick={() => setTaskMode(mode)}
+                    >
+                      {mode === "manual" ? "手动" : mode === "template" ? "模板" : "批量"}
+                    </button>
+                  ))}
+                </div>
                 <input
                   className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
                   value={taskGoal}
@@ -379,14 +637,20 @@ export function SimulationDashboard() {
                   <NumberInput label="目标 X" value={targetX} onChange={setTargetX} />
                   <NumberInput label="目标 Y" value={targetY} onChange={setTargetY} />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="secondary" disabled={!run} onClick={() => handleCreateTask(false)}>
-                    手动任务
-                  </Button>
-                  <Button disabled={!run || !templateId} onClick={() => handleCreateTask(true)}>
-                    模板生成
-                  </Button>
-                </div>
+                {taskMode === "batch" && (
+                  <NumberInput label="批量数量" value={batchCount} onChange={(value) => setBatchCount(Math.max(1, Math.min(50, value)))} />
+                )}
+                <Button
+                  disabled={!run || (taskMode === "template" && !templateId)}
+                  onClick={() =>
+                    taskMode === "batch"
+                      ? void handleCreateBatchTasks()
+                      : void handleCreateTask(taskMode === "template")
+                  }
+                >
+                  <ListChecks size={15} />
+                  {taskMode === "manual" ? "创建手动任务" : taskMode === "template" ? "模板生成任务" : "批量生成任务"}
+                </Button>
               </div>
               <div className="mt-4 space-y-2">
                 {tasks.slice(0, 3).map((task) => (
@@ -423,19 +687,96 @@ export function SimulationDashboard() {
             <Panel className="p-4">
               <PanelTitle icon={Send} title="发指令" subtitle="通过消息总成创建 Action" />
               <div className="mt-4 grid gap-3">
+                <div className="grid grid-cols-2 gap-1 rounded-lg border border-neutral-200 bg-neutral-50 p-1">
+                  {(["quick", "advanced"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={`h-8 rounded-md text-xs font-medium transition ${
+                        commandMode === mode ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500 hover:text-neutral-900"
+                      }`}
+                      onClick={() => setCommandMode(mode)}
+                    >
+                      {mode === "quick" ? "快捷指令" : "高级指令"}
+                    </button>
+                  ))}
+                </div>
                 <select
                   className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
-                  value={command}
-                  onChange={(event) => setCommand(event.currentTarget.value as "goto_pose" | "where" | "stop")}
+                  value={effectiveRobotCode}
+                  onChange={(event) => setSelectedRobotCode(event.currentTarget.value)}
                 >
-                  <option value="goto_pose">goto_pose</option>
-                  <option value="where">where</option>
-                  <option value="stop">stop</option>
+                  {(selectedScenario?.robotCodes.length ? selectedScenario.robotCodes : robots.map((robot) => robot.robotId)).map((robotCode) => (
+                    <option key={robotCode} value={robotCode}>
+                      {robotCode}
+                    </option>
+                  ))}
                 </select>
-                <Button disabled={!run} onClick={handleSendAction}>
-                  <Send size={15} />
-                  下发 Action
-                </Button>
+                {commandMode === "quick" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="secondary"
+                      disabled={!run}
+                      onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-1"))}
+                    >
+                      <Route size={15} />
+                      到装载
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!run}
+                      onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-2"))}
+                    >
+                      <Route size={15} />
+                      到分拣
+                    </Button>
+                    <Button variant="secondary" disabled={!run} onClick={() => void handleQuickAction("where")}>
+                      <Eye size={15} />
+                      查询位置
+                    </Button>
+                    <Button variant="secondary" disabled={!run} onClick={() => void handleQuickAction("stop")}>
+                      <Square size={15} />
+                      停止动作
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                      value={command}
+                      onChange={(event) => setCommand(event.currentTarget.value as "goto_pose" | "where" | "stop")}
+                    >
+                      <option value="goto_pose">goto_pose</option>
+                      <option value="where">where</option>
+                      <option value="stop">stop</option>
+                    </select>
+                    {command === "goto_pose" ? (
+                      <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="text-xs font-semibold text-neutral-700">goto_pose 参数</span>
+                          <Badge tone="blue">坐标</Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <NumberInput label="目标 X" value={targetX} onChange={setTargetX} />
+                          <NumberInput label="目标 Y" value={targetY} onChange={setTargetY} />
+                          <NumberInput label="目标 Z" value={targetZ} onChange={setTargetZ} />
+                          <NumberInput label="Yaw" value={targetYaw} onChange={setTargetYaw} />
+                        </div>
+                        <div className="mt-3 rounded-md bg-white px-3 py-2 font-mono text-[11px] text-neutral-500">
+                          {JSON.stringify(commandTargetParams(targetX, targetY, targetZ, targetYaw))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+                        {command} 当前无需坐标参数，将以空 params 下发。
+                      </div>
+                    )}
+                    <NumberInput label="超时 ms" value={timeoutMs} onChange={(value) => setTimeoutMs(Math.max(1000, value))} />
+                    <Button disabled={!run} onClick={handleSendAction}>
+                      <SlidersHorizontal size={15} />
+                      下发高级 Action
+                    </Button>
+                  </>
+                )}
               </div>
               <div className="mt-4 space-y-2">
                 {actions.slice(0, 4).map((action) => (
@@ -502,10 +843,38 @@ export function SimulationDashboard() {
                   onChange={(event) => setExceptionTarget(event.currentTarget.value)}
                   placeholder="robot-001 / edge-2 / api"
                 />
-                <Button variant="danger" disabled={!run} onClick={handleInjectException}>
-                  <Zap size={15} />
-                  注入异常
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberInput label="持续 ms" value={exceptionDurationMs} onChange={(value) => setExceptionDurationMs(Math.max(0, value))} />
+                  <label className="flex items-end gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-500">
+                    <input
+                      type="checkbox"
+                      checked={exceptionAutoRecover}
+                      onChange={(event) => setExceptionAutoRecover(event.currentTarget.checked)}
+                    />
+                    自动恢复
+                  </label>
+                </div>
+                <select
+                  className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                  value={recoveryMode}
+                  onChange={(event) => setRecoveryMode(event.currentTarget.value as typeof recoveryMode)}
+                >
+                  {recoveryModes.map((mode) => (
+                    <option key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="danger" disabled={!run} onClick={handleInjectException}>
+                    <Zap size={15} />
+                    注入异常
+                  </Button>
+                  <Button variant="secondary" disabled={!run} onClick={handleRecoverException}>
+                    <RotateCcw size={15} />
+                    恢复
+                  </Button>
+                </div>
               </div>
             </Panel>
           </div>
@@ -513,20 +882,30 @@ export function SimulationDashboard() {
 
         <Panel className="p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <PanelTitle icon={MessageSquareText} title="看消息" subtitle="Command / Telemetry / Event / Ack / Alert" />
-            <div className="flex flex-wrap gap-1.5">
-              {messageFilters.map((filter) => (
-                <Button
-                  key={filter}
-                  variant={messageFilter === filter ? "default" : "secondary"}
-                  onClick={() => setMessageFilter(filter)}
-                >
-                  {filter}
-                </Button>
-              ))}
+            <PanelTitle icon={MessageSquareText} title="看消息" subtitle="Command / Telemetry / Event / Ack / Alert / Interface / AgentDecision" />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
+                {messageFilters.map((filter) => (
+                  <Button
+                    key={filter}
+                    variant={messageFilter === filter ? "default" : "secondary"}
+                    onClick={() => setMessageFilter(filter)}
+                  >
+                    {filter}
+                  </Button>
+                ))}
+              </div>
+              <Button variant="secondary" onClick={handleExportMessages} disabled={!run}>
+                <FileDown size={15} />
+                导出消息
+              </Button>
+              <Button variant="secondary" onClick={handleReplayMessage} disabled={!run || !selectedMessage}>
+                <RotateCcw size={15} />
+                沙箱重放
+              </Button>
             </div>
           </div>
-          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
+          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.75fr_0.75fr_0.95fr]">
             <DiagnosticList
               title="Messages"
               items={filteredMessages.slice(0, 10).map((message) => ({
@@ -535,6 +914,8 @@ export function SimulationDashboard() {
                 value: messageCategory(message),
                 meta: message.topic
               }))}
+              selectedId={selectedMessage?.messageId}
+              onSelect={setSelectedMessageId}
             />
             <DiagnosticList
               title="Observations"
@@ -554,6 +935,7 @@ export function SimulationDashboard() {
                 meta: `${span.entityType}:${span.entityId}`
               }))}
             />
+            <MessageDetail message={selectedMessage} onCopy={handleCopyMessagePayload} />
           </div>
         </Panel>
       </div>
@@ -594,6 +976,21 @@ function ReadOnlyMap({
   for (let y = 0; y <= map.height; y += map.gridSize) {
     gridLines.push(<line key={`y-${y}`} x1={0} x2={map.width} y1={y} y2={y} />);
   }
+  const axisLabels = [];
+  for (let x = 0; x <= map.width; x += map.gridSize * 5) {
+    axisLabels.push(
+      <text key={`xl-${x}`} x={x + 4} y={18} fill="#737373" fontSize="12">
+        {x}
+      </text>
+    );
+  }
+  for (let y = 0; y <= map.height; y += map.gridSize * 5) {
+    axisLabels.push(
+      <text key={`yl-${y}`} x={6} y={y - 4} fill="#737373" fontSize="12">
+        {y}
+      </text>
+    );
+  }
   return (
     <div className="relative h-full min-h-[660px] overflow-hidden rounded-lg border border-neutral-200 bg-white">
       <svg viewBox={`0 0 ${map.width} ${map.height}`} className="h-full min-h-[660px] w-full">
@@ -605,6 +1002,7 @@ function ReadOnlyMap({
           <line x1={0} y1={0} x2={map.width} y2={0} />
           <line x1={0} y1={0} x2={0} y2={map.height} />
         </g>
+        <g>{axisLabels}</g>
         <g stroke="#111827" strokeOpacity="0.32" strokeWidth="3">
           {map.pathEdges.map((edge) => {
             const from = map.objects.find((item) => item.id === edge.from);
@@ -631,6 +1029,20 @@ function ReadOnlyMap({
             </text>
           </motion.g>
         ))}
+        {activeEvents.map((event, index) => {
+          const position = eventPosition(map, robots, event);
+          if (!position) {
+            return null;
+          }
+          return (
+            <g key={`${String(event.event)}-${String(event.targetId)}-${index}`}>
+              <circle cx={position.x} cy={position.y} r={28} fill="#fee2e2" stroke="#ef4444" strokeWidth={2} opacity={0.9} />
+              <text x={position.x + 34} y={position.y + 5} fill="#b91c1c" fontSize="13" fontWeight="600">
+                {String(event.event)}
+              </text>
+            </g>
+          );
+        })}
       </svg>
       <div className="absolute bottom-3 left-3 flex flex-wrap gap-2 rounded-lg border border-neutral-200 bg-white/90 px-3 py-2 text-xs text-neutral-600 shadow-sm backdrop-blur">
         <span>{map.name}</span>
@@ -685,12 +1097,37 @@ function ReadOnlyShape({ item }: { item: MapObject }) {
   );
 }
 
+function eventPosition(map: SiteMap, robots: RobotState[], event: Record<string, unknown>) {
+  const targetId = String(event.targetId ?? "");
+  const object = map.objects.find((item) => item.id === targetId);
+  if (object) {
+    return { x: object.x, y: object.y };
+  }
+  const edge = map.pathEdges.find((item) => item.id === targetId);
+  if (edge) {
+    const from = map.objects.find((item) => item.id === edge.from);
+    const to = map.objects.find((item) => item.id === edge.to);
+    if (from && to) {
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    }
+  }
+  const robot = robots.find((item) => item.robotId === targetId);
+  if (robot) {
+    return { x: robot.x, y: robot.y };
+  }
+  return null;
+}
+
 function DiagnosticList({
   title,
-  items
+  items,
+  selectedId,
+  onSelect
 }: {
   title: string;
   items: Array<{ id: string; label: string; value: string; meta: string }>;
+  selectedId?: string;
+  onSelect?: (id: string) => void;
 }) {
   return (
     <div>
@@ -700,15 +1137,59 @@ function DiagnosticList({
           <EmptyState text="暂无数据" />
         ) : (
           items.map((item) => (
-            <div key={item.id} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+            <button
+              key={item.id}
+              className={`w-full rounded-lg border p-3 text-left transition ${
+                selectedId === item.id
+                  ? "border-neutral-950 bg-white shadow-sm"
+                  : "border-neutral-200 bg-neutral-50 hover:border-neutral-300"
+              }`}
+              onClick={() => onSelect?.(item.id)}
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium">{item.label}</span>
                 <Badge tone={statusTone(item.value)}>{item.value}</Badge>
               </div>
               <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">{item.meta}</div>
-            </div>
+            </button>
           ))
         )}
+      </div>
+    </div>
+  );
+}
+
+function MessageDetail({ message, onCopy }: { message: MessageRecord | null; onCopy: () => void }) {
+  if (!message) {
+    return (
+      <div>
+        <div className="mb-2 text-sm font-semibold">Message Detail</div>
+        <EmptyState text="请选择一条消息" />
+      </div>
+    );
+  }
+  const payload = message.payload;
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Message Detail</div>
+        <Button variant="secondary" onClick={onCopy}>
+          <Copy size={14} />
+          复制
+        </Button>
+      </div>
+      <div className="max-h-[300px] overflow-auto rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+        <div className="space-y-2 text-xs text-neutral-600">
+          <InfoRow label="messageId" value={message.messageId} />
+          <InfoRow label="traceId" value={String(payload.traceId ?? "-")} />
+          <InfoRow label="taskId" value={String(payload.taskId ?? "-")} />
+          <InfoRow label="robotCode" value={String(payload.robotCode ?? payload.robotId ?? "-")} />
+          <InfoRow label="source" value={message.source} />
+          <InfoRow label="topic" value={message.topic} />
+        </div>
+        <pre className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-white p-3 font-mono text-[11px] leading-5 text-neutral-600">
+          {JSON.stringify(payload, null, 2)}
+        </pre>
       </div>
     </div>
   );
@@ -776,6 +1257,23 @@ function robotsFromState(state: CurrentState | null, scenario?: ScenarioSummary)
   }));
 }
 
+function stationTarget(map: SiteMap | undefined, stationId: string) {
+  const station = map?.objects.find((item) => item.id === stationId) ?? map?.objects.find((item) => item.type === "station");
+  return {
+    x: station?.x ?? 760,
+    y: station?.y ?? 420
+  };
+}
+
+function commandTargetParams(x: number, y: number, z: number, yaw: number) {
+  return {
+    x,
+    y,
+    z,
+    yaw
+  };
+}
+
 function messageCategory(message: MessageRecord) {
   if (message.messageType === "command") {
     return "Command";
@@ -786,6 +1284,12 @@ function messageCategory(message: MessageRecord) {
   }
   if (["pose.updated", "where.result"].includes(event)) {
     return "Telemetry";
+  }
+  if (event.startsWith("interface.")) {
+    return "Interface";
+  }
+  if (event.startsWith("agent.")) {
+    return "AgentDecision";
   }
   if (
     [
@@ -809,16 +1313,16 @@ function messageCategory(message: MessageRecord) {
 }
 
 function statusTone(value: string): "neutral" | "blue" | "green" | "amber" | "red" {
-  if (["Succeeded", "Running", "Accepted", "Issued", "Moving", "ok", "Event", "Telemetry"].includes(value)) {
+  if (["Succeeded", "Running", "Accepted", "Issued", "Moving", "ok", "Event", "Telemetry", "passed"].includes(value)) {
     return "green";
   }
-  if (["Alert", "Failed", "Rejected", "Timeout", "Error", "Offline", "critical"].includes(value)) {
+  if (["Alert", "Failed", "Rejected", "Timeout", "Error", "Offline", "critical", "failed"].includes(value)) {
     return "red";
   }
-  if (["Paused", "Draft", "Ready", "Pending", "Ack"].includes(value)) {
+  if (["Paused", "Draft", "Ready", "Pending", "Ack", "warning"].includes(value)) {
     return "amber";
   }
-  if (["Command"].includes(value)) {
+  if (["Command", "Interface", "AgentDecision"].includes(value)) {
     return "blue";
   }
   return "neutral";

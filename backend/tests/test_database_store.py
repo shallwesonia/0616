@@ -4,9 +4,12 @@ from uuid import UUID
 from backend.app.database_store import DatabaseStore
 from backend.app.schemas import (
     ActionCreate,
+    BatchTaskCreate,
+    MessageReplayCreate,
     MessageRecord,
     RobotState,
     SimulationEventCreate,
+    SimulationEventRecoveryCreate,
     SimulationRunCreate,
     SimulationTaskCreate,
     SnapshotCreate,
@@ -225,3 +228,88 @@ def test_database_store_p3_simulation_run_chain(tmp_path):
     assert exported["manifest"]["secretPolicy"] == "secrets-excluded"
     assert exported["run"]["runId"] == run.runId
     assert exported["observations"]
+
+
+def test_database_store_simulation_cockpit_enhancements(tmp_path):
+    store = create_store(tmp_path)
+    scenario = store.list_scenarios()[0]
+
+    validation = store.validate_scenario(scenario.scenarioId)
+    assert validation is not None
+    assert validation.ok is True
+    assert any(check.code == "map.integrity" for check in validation.checks)
+
+    run = store.create_simulation_run(SimulationRunCreate(scenarioId=scenario.scenarioId, name="enhanced cockpit"))
+    batch = store.create_batch_tasks(
+        run.runId,
+        BatchTaskCreate(
+            templateId="sort-transfer",
+            goal="Batch transfer",
+            count=3,
+            targetRange={"x": [700, 760], "y": [380, 420]},
+            randomSeed=42,
+        ),
+    )
+    assert batch is not None
+    assert batch.createdCount == 3
+    assert all(task.constraints["batchId"] == batch.batchId for task in batch.tasks)
+
+    task = batch.tasks[0]
+    action = store.create_action(
+        ActionCreate(
+            runId=run.runId,
+            taskId=task.taskId,
+            command="goto_pose",
+            params={"x": 760, "y": 420, "z": 0, "yaw": 0},
+        )
+    )
+    assert action is not None
+    issued = store.mark_action_issued(action.actionId, "CMD-ENH-001", None, {"mqttPublished": False})
+    assert issued is not None
+
+    result_message = MessageRecord(
+        messageId="EVT-ENH-001",
+        messageType="event",
+        source="device",
+        topic="factory/dogs/robot-001/result",
+        createdAt="2026-06-23T00:10:00+00:00",
+        payload={
+            "event": "command.accepted",
+            "eventId": "EVT-ENH-001",
+            "commandId": "CMD-ENH-001",
+            "taskId": task.taskId,
+            "robotCode": "robot-001",
+            "traceId": task.traceId,
+            "timestamp": "2026-06-23T00:10:00+00:00",
+            "data": {},
+            "error": None,
+        },
+    )
+    store.append_message(result_message)
+    store.ingest_observation_from_message(result_message)
+
+    replay = store.replay_run_message(
+        run.runId,
+        "EVT-ENH-001",
+        MessageReplayCreate(reason="test replay"),
+    )
+    assert replay is not None
+    assert replay.message.payload["event"] == "message.replayed"
+    assert replay.message.payload["data"]["sandbox"] is True
+
+    alert = store.inject_simulation_event(
+        run.runId,
+        SimulationEventCreate(eventType="path.blocked", targetType="path", targetId="edge-2", severity="error"),
+    )
+    assert alert is not None
+    assert "edge-2" in store.get_current_state(run.runId).resourceStates["blockedPaths"]
+
+    recovered = store.recover_simulation_event(
+        run.runId,
+        SimulationEventRecoveryCreate(eventType="path.blocked", targetType="path", targetId="edge-2"),
+    )
+    assert recovered is not None
+    state = store.get_current_state(run.runId)
+    assert state is not None
+    assert "edge-2" not in state.resourceStates["blockedPaths"]
+    assert recovered.event == "fault.recovered"

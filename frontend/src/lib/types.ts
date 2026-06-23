@@ -146,6 +146,20 @@ export interface ScenarioSummary {
   map: SiteMap;
 }
 
+export interface ScenarioValidationCheck {
+  code: string;
+  label: string;
+  status: "passed" | "warning" | "failed";
+  detail: string;
+}
+
+export interface ScenarioValidationResponse {
+  scenarioId: string;
+  ok: boolean;
+  issues: string[];
+  checks: ScenarioValidationCheck[];
+}
+
 export interface TaskTemplate {
   templateId: string;
   name: string;
@@ -202,6 +216,14 @@ export interface SimulationTask {
   activePlan?: SimulationPlan | null;
 }
 
+export interface BatchTaskResponse {
+  batchId: string;
+  runId: string;
+  requestedCount: number;
+  createdCount: number;
+  tasks: SimulationTask[];
+}
+
 export interface SimulationRun {
   runId: string;
   scenarioId: string;
@@ -256,6 +278,15 @@ export interface Observation {
   data: Record<string, unknown>;
   error?: Record<string, unknown> | null;
   processingStatus: string;
+}
+
+export interface MessageReplayResponse {
+  replayId: string;
+  runId: string;
+  replayMode: string;
+  sandbox: boolean;
+  message: MessageRecord;
+  observation?: Observation | null;
 }
 
 export interface CurrentState {

@@ -158,6 +158,20 @@ class ScenarioSummary(BaseModel):
     map: SiteMap
 
 
+class ScenarioValidationCheck(BaseModel):
+    code: str
+    label: str
+    status: Literal["passed", "warning", "failed"]
+    detail: str
+
+
+class ScenarioValidationResponse(BaseModel):
+    scenarioId: str
+    ok: bool
+    issues: list[str] = Field(default_factory=list)
+    checks: list[ScenarioValidationCheck] = Field(default_factory=list)
+
+
 class SimulationRunCreate(BaseModel):
     scenarioId: str = "default-site-a"
     name: str | None = None
@@ -199,6 +213,29 @@ class TaskFromTemplateCreate(BaseModel):
     templateId: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     createdBy: str = "simulation-console"
+
+
+class BatchTaskCreate(BaseModel):
+    templateId: str | None = None
+    goal: str = "Batch simulation task"
+    count: int = Field(default=3, ge=1, le=50)
+    intervalMs: int = Field(default=0, ge=0)
+    priority: int = 5
+    targetRange: dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    randomSeed: int | None = None
+    randomizeRobot: bool = False
+    randomizeTaskType: bool = False
+    autoRun: bool = False
+    createdBy: str = "simulation-console"
+
+
+class BatchTaskResponse(BaseModel):
+    batchId: str
+    runId: str
+    requestedCount: int
+    createdCount: int
+    tasks: list["SimulationTask"] = Field(default_factory=list)
 
 
 class PlanStep(BaseModel):
@@ -334,6 +371,39 @@ class SimulationEventCreate(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     durationMs: int | None = None
     autoRecover: bool = False
+
+
+class SimulationEventRecoveryCreate(BaseModel):
+    eventType: str | None = None
+    targetType: Literal["robot", "path", "station", "interface", "message", "resource"] = "robot"
+    targetId: str | None = None
+    recoveryMode: Literal[
+        "manual",
+        "auto",
+        "retry",
+        "reschedule",
+        "skip_step",
+        "takeover",
+        "terminate_task",
+    ] = "manual"
+    reason: str = "operator recovery"
+    operatorId: str = "simulation-console"
+
+
+class MessageReplayCreate(BaseModel):
+    replayMode: Literal["single", "task", "time_window"] = "single"
+    sandbox: bool = True
+    reason: str = "operator replay"
+    operatorId: str = "simulation-console"
+
+
+class MessageReplayResponse(BaseModel):
+    replayId: str
+    runId: str
+    replayMode: str
+    sandbox: bool
+    message: MessageRecord
+    observation: Observation | None = None
 
 
 class SnapshotCreate(BaseModel):

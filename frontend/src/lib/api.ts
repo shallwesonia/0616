@@ -4,12 +4,15 @@ import type {
   ConnectionInfo,
   CurrentState,
   DraftResponse,
+  BatchTaskResponse,
   HealthResponse,
+  MessageReplayResponse,
   MessageRecord,
   MqttContract,
   Observation,
   RobotState,
   ScenarioSummary,
+  ScenarioValidationResponse,
   SimulationAction,
   SimulationRun,
   SimulationTask,
@@ -143,6 +146,10 @@ export function getScenarios() {
   return request<ScenarioSummary[]>("/api/v1/scenarios");
 }
 
+export function validateScenario(scenarioId: string) {
+  return request<ScenarioValidationResponse>(`/api/v1/scenarios/${encodeURIComponent(scenarioId)}/validation`);
+}
+
 export function getTaskTemplates() {
   return request<TaskTemplate[]>("/api/v1/task-templates");
 }
@@ -160,6 +167,14 @@ export function getSimulationRuns() {
 
 export function startSimulationRun(runId: string) {
   return request<SimulationRun>(`/api/v1/simulation-runs/${runId}/start`, { method: "POST" });
+}
+
+export function pauseSimulationRun(runId: string) {
+  return request<SimulationRun>(`/api/v1/simulation-runs/${runId}/pause`, { method: "POST" });
+}
+
+export function resumeSimulationRun(runId: string) {
+  return request<SimulationRun>(`/api/v1/simulation-runs/${runId}/resume`, { method: "POST" });
 }
 
 export function stopSimulationRun(runId: string) {
@@ -190,6 +205,29 @@ export function createSimulationTaskFromTemplate(
   return request<SimulationTask>(`/api/v1/simulation-runs/${runId}/tasks/from-template`, {
     method: "POST",
     body: JSON.stringify({ templateId, parameters })
+  });
+}
+
+export function createSimulationTasksBatch(
+  runId: string,
+  payload: {
+    templateId?: string | null;
+    goal: string;
+    count: number;
+    intervalMs?: number;
+    priority?: number;
+    targetRange?: Record<string, unknown>;
+    parameters?: Record<string, unknown>;
+    randomSeed?: number | null;
+    randomizeRobot?: boolean;
+    randomizeTaskType?: boolean;
+    autoRun?: boolean;
+    createdBy?: string;
+  }
+) {
+  return request<BatchTaskResponse>(`/api/v1/simulation-runs/${runId}/tasks/batch`, {
+    method: "POST",
+    body: JSON.stringify(payload)
   });
 }
 
@@ -227,6 +265,25 @@ export function getRunMessages(runId: string, category?: string) {
   return request<MessageRecord[]>(`/api/v1/simulation-runs/${runId}/messages${query}`);
 }
 
+export function replayRunMessage(
+  runId: string,
+  messageId: string,
+  payload: {
+    replayMode?: "single" | "task" | "time_window";
+    sandbox?: boolean;
+    reason?: string;
+    operatorId?: string;
+  } = {}
+) {
+  return request<MessageReplayResponse>(
+    `/api/v1/simulation-runs/${runId}/messages/${encodeURIComponent(messageId)}/replay`,
+    {
+      method: "POST",
+      body: JSON.stringify({ replayMode: "single", sandbox: true, reason: "operator replay", ...payload })
+    }
+  );
+}
+
 export function getRunObservations(runId: string) {
   return request<Observation[]>(`/api/v1/simulation-runs/${runId}/observations`);
 }
@@ -244,6 +301,23 @@ export function injectSimulationEvent(
   }
 ) {
   return request<Observation>(`/api/v1/simulation-runs/${runId}/events`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function recoverSimulationEvent(
+  runId: string,
+  payload: {
+    eventType?: string | null;
+    targetType: "robot" | "path" | "station" | "interface" | "message" | "resource";
+    targetId?: string | null;
+    recoveryMode?: "manual" | "auto" | "retry" | "reschedule" | "skip_step" | "takeover" | "terminate_task";
+    reason?: string;
+    operatorId?: string;
+  }
+) {
+  return request<Observation>(`/api/v1/simulation-runs/${runId}/events/recover`, {
     method: "POST",
     body: JSON.stringify(payload)
   });

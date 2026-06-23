@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse
 from .mqtt_bridge import PlatformMqttBridge
 from .mqtt_contract import MQTT_CONTRACT
 from .schemas import (
+    BatchTaskCreate,
+    BatchTaskResponse,
     CommandCreate,
     CommandResponse,
     ConsoleEventCreate,
@@ -24,12 +26,16 @@ from .schemas import (
     MapImportResponse,
     MapDraftCreate,
     MessageRecord,
+    MessageReplayCreate,
+    MessageReplayResponse,
     Observation,
     RobotState,
     ScenarioSummary,
+    ScenarioValidationResponse,
     SiteMap,
     SimulationAction,
     SimulationEventCreate,
+    SimulationEventRecoveryCreate,
     SimulationRun,
     SimulationRunCreate,
     SimulationTask,
@@ -433,6 +439,16 @@ def get_scenario(scenario_id: str) -> ScenarioSummary:
     return scenario
 
 
+@app.get("/api/v1/scenarios/{scenario_id}/validation", response_model=ScenarioValidationResponse)
+def validate_scenario(scenario_id: str) -> ScenarioValidationResponse:
+    if not hasattr(store, "validate_scenario"):
+        raise HTTPException(status_code=501, detail="scenario validation requires database store")
+    validation = store.validate_scenario(scenario_id)
+    if validation is None:
+        raise HTTPException(status_code=404, detail="scenario not found")
+    return validation
+
+
 @app.get("/api/v1/task-templates", response_model=list[TaskTemplate])
 def list_task_templates() -> list[TaskTemplate]:
     return store.list_task_templates()
@@ -505,6 +521,16 @@ def create_simulation_task_from_template(run_id: str, request: TaskFromTemplateC
     if task is None:
         raise HTTPException(status_code=404, detail="simulation run or task template not found")
     return task
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/tasks/batch", response_model=BatchTaskResponse)
+def create_simulation_tasks_batch(run_id: str, request: BatchTaskCreate) -> BatchTaskResponse:
+    if not hasattr(store, "create_batch_tasks"):
+        raise HTTPException(status_code=501, detail="batch task creation requires database store")
+    response = store.create_batch_tasks(run_id, request)
+    if response is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return response
 
 
 @app.get("/api/v1/simulation-runs/{run_id}/tasks", response_model=list[SimulationTask])
@@ -606,6 +632,20 @@ def list_simulation_run_messages(
     return store.list_run_messages(run_id, limit=limit, category=category)
 
 
+@app.post("/api/v1/simulation-runs/{run_id}/messages/{message_id}/replay", response_model=MessageReplayResponse)
+def replay_simulation_run_message(
+    run_id: str,
+    message_id: str,
+    request: MessageReplayCreate,
+) -> MessageReplayResponse:
+    if not hasattr(store, "replay_run_message"):
+        raise HTTPException(status_code=501, detail="message replay requires database store")
+    response = store.replay_run_message(run_id, message_id, request)
+    if response is None:
+        raise HTTPException(status_code=404, detail="message not found in simulation run")
+    return response
+
+
 @app.get("/api/v1/simulation-runs/{run_id}/observations", response_model=list[Observation])
 def list_simulation_run_observations(run_id: str, limit: int = 100) -> list[Observation]:
     return store.list_observations(run_id, limit=limit)
@@ -614,6 +654,16 @@ def list_simulation_run_observations(run_id: str, limit: int = 100) -> list[Obse
 @app.post("/api/v1/simulation-runs/{run_id}/events", response_model=Observation)
 def inject_simulation_event(run_id: str, request: SimulationEventCreate) -> Observation:
     observation = store.inject_simulation_event(run_id, request)
+    if observation is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return observation
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/events/recover", response_model=Observation)
+def recover_simulation_event(run_id: str, request: SimulationEventRecoveryCreate) -> Observation:
+    if not hasattr(store, "recover_simulation_event"):
+        raise HTTPException(status_code=501, detail="event recovery requires database store")
+    observation = store.recover_simulation_event(run_id, request)
     if observation is None:
         raise HTTPException(status_code=404, detail="simulation run not found")
     return observation

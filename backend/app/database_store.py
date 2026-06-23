@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,14 +34,21 @@ from .db_models import (
 from .runtime_cache import RuntimeCache
 from .schemas import (
     ActionCreate,
+    BatchTaskCreate,
+    BatchTaskResponse,
     CurrentState,
+    MessageReplayCreate,
+    MessageReplayResponse,
     MessageRecord,
     Observation,
     PlanStep,
     RobotState,
     ScenarioSummary,
+    ScenarioValidationCheck,
+    ScenarioValidationResponse,
     SimulationAction,
     SimulationEventCreate,
+    SimulationEventRecoveryCreate,
     SimulationPlan,
     SimulationRun,
     SimulationRunCreate,
@@ -512,6 +520,70 @@ class DatabaseStore(JsonStore):
         scenario = self._default_scenario()
         return scenario if scenario.scenarioId == scenario_id else None
 
+    def validate_scenario(self, scenario_id: str) -> ScenarioValidationResponse | None:
+        scenario = self.get_scenario(scenario_id)
+        if scenario is None:
+            return None
+
+        checks: list[ScenarioValidationCheck] = []
+        issues: list[str] = []
+
+        def add_check(code: str, label: str, passed: bool, detail: str, warning: bool = False) -> None:
+            status = "passed" if passed else ("warning" if warning else "failed")
+            checks.append(ScenarioValidationCheck(code=code, label=label, status=status, detail=detail))
+            if not passed and not warning:
+                issues.append(detail)
+
+        map_issues = self.validate_map(scenario.map)
+        add_check(
+            "map.integrity",
+            "Map integrity",
+            len(map_issues) == 0,
+            "map validation passed" if not map_issues else "; ".join(map_issues[:3]),
+        )
+
+        stations = [item for item in scenario.map.objects if item.type == "station"]
+        path_nodes = [item for item in scenario.map.objects if item.type == "pathNode"]
+        add_check("station.exists", "Stations", len(stations) > 0, "at least one station is required")
+        add_check("path.exists", "Path graph", len(path_nodes) > 1 and len(scenario.map.pathEdges) > 0, "path graph must contain nodes and edges")
+        add_check("robot.exists", "Robot instances", len(scenario.robotCodes) > 0, "at least one robot instance is required")
+
+        commands = set(scenario.actionSet.get("commands") or [])
+        add_check(
+            "actionset.commands",
+            "Action set",
+            {"goto_pose", "where", "stop"}.issubset(commands),
+            "action set must support goto_pose, where and stop",
+        )
+
+        templates = self.list_task_templates()
+        add_check("task.templates", "Task templates", len(templates) > 0, "at least one task template is required")
+
+        resource_profile = scenario.resourceProfile or {}
+        add_check(
+            "resource.profile",
+            "Resource profile",
+            "pathCapacity" in resource_profile,
+            "resource profile should define pathCapacity",
+            warning=True,
+        )
+
+        task_modes = set((scenario.taskFlow or {}).get("modes") or [])
+        add_check(
+            "taskflow.modes",
+            "Task flow modes",
+            {"manual", "template"}.issubset(task_modes),
+            "task flow should support manual and template creation",
+            warning=True,
+        )
+
+        return ScenarioValidationResponse(
+            scenarioId=scenario.scenarioId,
+            ok=not issues,
+            issues=issues,
+            checks=checks,
+        )
+
     def list_task_templates(self) -> list[TaskTemplate]:
         return self.TASK_TEMPLATES
 
@@ -685,6 +757,72 @@ class DatabaseStore(JsonStore):
                 expectedOutcome=str(request.parameters.get("expectedOutcome") or template.description),
                 createdBy=request.createdBy,
             ),
+        )
+
+    def create_batch_tasks(self, run_id: str, request: BatchTaskCreate) -> BatchTaskResponse | None:
+        if self.get_simulation_run(run_id) is None:
+            return None
+
+        rng = random.Random(request.randomSeed)
+        batch_id = protocol_id("BATCH")
+        created_tasks: list[SimulationTask] = []
+        target_range = request.targetRange or {}
+        x_values = target_range.get("x") if isinstance(target_range.get("x"), list) else None
+        y_values = target_range.get("y") if isinstance(target_range.get("y"), list) else None
+
+        for index in range(request.count):
+            parameters = {
+                **request.parameters,
+                "priority": request.priority,
+                "constraints": {
+                    **dict(request.parameters.get("constraints") or {}),
+                    "batchId": batch_id,
+                    "batchIndex": index + 1,
+                    "intervalMs": request.intervalMs,
+                    "randomizeRobot": request.randomizeRobot,
+                    "randomizeTaskType": request.randomizeTaskType,
+                    "autoRun": request.autoRun,
+                },
+            }
+            if x_values and y_values and len(x_values) == 2 and len(y_values) == 2:
+                parameters["target"] = {
+                    "x": rng.uniform(float(x_values[0]), float(x_values[1])),
+                    "y": rng.uniform(float(y_values[0]), float(y_values[1])),
+                    "z": 0,
+                    "yaw": 0,
+                }
+
+            if request.templateId:
+                task = self.create_task_from_template(
+                    run_id,
+                    TaskFromTemplateCreate(
+                        templateId=request.templateId,
+                        parameters={"goal": f"{request.goal} #{index + 1}", **parameters},
+                        createdBy=request.createdBy,
+                    ),
+                )
+            else:
+                target = parameters.get("target") or {"x": 760, "y": 420, "z": 0, "yaw": 0}
+                task = self.create_simulation_task(
+                    run_id,
+                    SimulationTaskCreate(
+                        goal=f"{request.goal} #{index + 1}",
+                        input={"command": "goto_pose", "target": target, "batchId": batch_id},
+                        constraints=dict(parameters.get("constraints") or {}),
+                        priority=request.priority,
+                        expectedOutcome="batch simulation task",
+                        createdBy=request.createdBy,
+                    ),
+                )
+            if task:
+                created_tasks.append(task)
+
+        return BatchTaskResponse(
+            batchId=batch_id,
+            runId=run_id,
+            requestedCount=request.count,
+            createdCount=len(created_tasks),
+            tasks=created_tasks,
         )
 
     def get_task(self, task_id: str) -> SimulationTask | None:
@@ -947,6 +1085,22 @@ class DatabaseStore(JsonStore):
                 return None
             active_task = self._latest_active_task(session, run_id)
             trace_id = active_task.trace_id if active_task else run_id
+        if request.eventType == "robot.offline" and request.targetType == "robot" and request.targetId:
+            robots = {robot.robotId: robot for robot in self.robots()}
+            robot = robots.get(request.targetId)
+            if robot:
+                self.upsert_robot_state(
+                    RobotState(
+                        robotId=robot.robotId,
+                        robotType=robot.robotType,
+                        state="Offline",
+                        x=robot.x,
+                        y=robot.y,
+                        progress=robot.progress,
+                        currentAction="fault.injected",
+                        updatedAt=iso_datetime(timestamp),
+                    )
+                )
         payload = {
             "schemaVersion": "1.0",
             "messageType": "event",
@@ -979,6 +1133,127 @@ class DatabaseStore(JsonStore):
         )
         self.append_message(message)
         return self.ingest_observation_from_message(message)
+
+    def recover_simulation_event(
+        self,
+        run_id: str,
+        request: SimulationEventRecoveryCreate,
+    ) -> Observation | None:
+        timestamp = now_utc()
+        event_id = protocol_id("EVT")
+        with self.database.session() as session:
+            run = self._run_row(session, run_id)
+            if run is None:
+                return None
+            active_task = self._latest_active_task(session, run_id)
+            trace_id = active_task.trace_id if active_task else run_id
+
+        if request.targetType == "robot" and request.targetId:
+            robots = {robot.robotId: robot for robot in self.robots()}
+            robot = robots.get(request.targetId)
+            if robot and robot.state == "Offline":
+                self.upsert_robot_state(
+                    RobotState(
+                        robotId=robot.robotId,
+                        robotType=robot.robotType,
+                        state="Idle",
+                        x=robot.x,
+                        y=robot.y,
+                        progress=robot.progress,
+                        currentAction="recovered",
+                        updatedAt=iso_datetime(timestamp),
+                    )
+                )
+
+        payload = {
+            "schemaVersion": "1.0",
+            "messageType": "event",
+            "event": "fault.recovered",
+            "eventId": event_id,
+            "commandId": None,
+            "taskId": active_task.task_id if active_task else None,
+            "requestId": None,
+            "robotCode": request.targetId if request.targetType == "robot" else None,
+            "traceId": trace_id,
+            "source": "simulation-console",
+            "timestamp": iso_datetime(timestamp),
+            "data": {
+                "eventType": request.eventType,
+                "targetType": request.targetType,
+                "targetId": request.targetId,
+                "recoveryMode": request.recoveryMode,
+                "reason": request.reason,
+                "operatorId": request.operatorId,
+                "severity": "info",
+            },
+            "error": None,
+        }
+        message = MessageRecord(
+            messageId=event_id,
+            messageType="event",
+            source="simulation-console",
+            topic=f"simulation/runs/{run_id}/events/recovery",
+            createdAt=payload["timestamp"],
+            payload=payload,
+        )
+        self.append_message(message)
+        observation = self.ingest_observation_from_message(message)
+        self._clear_recovered_fault(run_id, request, observation)
+        return observation
+
+    def replay_run_message(
+        self,
+        run_id: str,
+        message_id: str,
+        request: MessageReplayCreate,
+    ) -> MessageReplayResponse | None:
+        original = next((message for message in self.list_run_messages(run_id, limit=1000) if message.messageId == message_id), None)
+        if original is None:
+            return None
+        timestamp = utc_now()
+        replay_id = protocol_id("REPLAY")
+        original_payload = original.payload
+        payload = {
+            "schemaVersion": "1.0",
+            "messageType": "event",
+            "event": "message.replayed",
+            "eventId": replay_id,
+            "runId": run_id,
+            "commandId": original_payload.get("commandId"),
+            "taskId": original_payload.get("taskId"),
+            "requestId": original_payload.get("requestId"),
+            "robotCode": original_payload.get("robotCode") or original_payload.get("robotId"),
+            "traceId": original_payload.get("traceId") or run_id,
+            "source": "simulation-replay",
+            "timestamp": timestamp,
+            "data": {
+                "replayMode": request.replayMode,
+                "sandbox": request.sandbox,
+                "reason": request.reason,
+                "operatorId": request.operatorId,
+                "replayOf": original.messageId,
+                "originalMessage": original.model_dump(),
+            },
+            "error": None,
+        }
+        message = MessageRecord(
+            messageId=replay_id,
+            messageType="event",
+            source="simulation-replay",
+            topic=f"simulation/runs/{run_id}/messages/replay",
+            createdAt=timestamp,
+            payload=payload,
+        )
+        self.append_message(message)
+        observation = self.ingest_observation_from_message(message)
+        return MessageReplayResponse(
+            replayId=replay_id,
+            runId=run_id,
+            replayMode=request.replayMode,
+            sandbox=request.sandbox,
+            message=message,
+            observation=observation,
+        )
 
     def list_observations(self, run_id: str, limit: int = 100) -> list[Observation]:
         with self.database.session() as session:
@@ -1409,6 +1684,10 @@ class DatabaseStore(JsonStore):
             return "Ack"
         if event in {"pose.updated", "where.result"}:
             return "Telemetry"
+        if event.startswith("interface."):
+            return "Interface"
+        if event.startswith("agent."):
+            return "AgentDecision"
         if event in {
             "task.failed",
             "task.timeout",
@@ -1538,7 +1817,7 @@ class DatabaseStore(JsonStore):
                 "severity": observation.data_json.get("severity"),
                 "timestamp": iso_datetime(observation.timestamp),
             }
-            if observation.category == "Alert":
+            if observation.category in {"Alert", "Interface"}:
                 active_events = [event_item, *active_events][:20]
                 environment_state["alerts"] = active_events
             if observation.event == "path.blocked":
@@ -1547,10 +1826,26 @@ class DatabaseStore(JsonStore):
                 if target_id and target_id not in blocked_paths:
                     blocked_paths.append(target_id)
                 resource_states["blockedPaths"] = blocked_paths
+            if observation.event == "station.unavailable":
+                stations = list(resource_states.get("stations") or [])
+                target_id = observation.data_json.get("targetId")
+                if target_id and target_id not in [item.get("stationId") for item in stations if isinstance(item, dict)]:
+                    stations.append({"stationId": target_id, "state": "Unavailable", "timestamp": iso_datetime(timestamp)})
+                resource_states["stations"] = stations[-20:]
             if observation.event == "resource.locked":
                 locks = list(resource_states.get("locks") or [])
                 locks.append({"resourceId": observation.data_json.get("targetId"), "timestamp": iso_datetime(timestamp)})
                 resource_states["locks"] = locks[-20:]
+            if observation.event in {"interface.timeout", "message.dropped"}:
+                interface_events = list(environment_state.get("interfaceEvents") or [])
+                interface_events.append(
+                    {
+                        "event": observation.event,
+                        "targetId": observation.data_json.get("targetId"),
+                        "timestamp": iso_datetime(timestamp),
+                    }
+                )
+                environment_state["interfaceEvents"] = interface_events[-20:]
         row.state_version += 1
         row.task_state_json = {
             "activeTaskId": latest_task.task_id if latest_task else None,
@@ -1567,6 +1862,55 @@ class DatabaseStore(JsonStore):
         row.last_observation_id = observation.observation_id if observation else row.last_observation_id
         row.last_observation_at = observation.timestamp if observation else row.last_observation_at
         row.updated_at = timestamp
+
+    def _clear_recovered_fault(
+        self,
+        run_id: str,
+        request: SimulationEventRecoveryCreate,
+        observation: Observation | None,
+    ) -> None:
+        timestamp = now_utc()
+        with self.database.session() as session:
+            row = self._current_state_row(session, run_id)
+            if row is None:
+                return
+            target_id = request.targetId
+            target_event = request.eventType
+            active_events = [
+                event
+                for event in list(row.active_events_json or [])
+                if not (
+                    (not target_id or event.get("targetId") == target_id)
+                    and (not target_event or event.get("event") == target_event)
+                )
+            ]
+            resource_states = dict(row.resource_states_json or {})
+            environment_state = dict(row.environment_state_json or {})
+            if request.targetType == "path" and target_id:
+                resource_states["blockedPaths"] = [
+                    path_id for path_id in list(resource_states.get("blockedPaths") or []) if path_id != target_id
+                ]
+            if request.targetType == "resource" and target_id:
+                resource_states["locks"] = [
+                    lock
+                    for lock in list(resource_states.get("locks") or [])
+                    if not isinstance(lock, dict) or lock.get("resourceId") != target_id
+                ]
+            if request.targetType == "station" and target_id:
+                resource_states["stations"] = [
+                    station
+                    for station in list(resource_states.get("stations") or [])
+                    if not isinstance(station, dict) or station.get("stationId") != target_id
+                ]
+            environment_state["alerts"] = active_events
+            row.active_events_json = active_events
+            row.resource_states_json = resource_states
+            row.environment_state_json = environment_state
+            row.robot_states_json = [robot.model_dump() for robot in self.robots()]
+            row.state_version += 1
+            row.last_observation_id = observation.observationId if observation else row.last_observation_id
+            row.last_observation_at = parse_datetime(observation.timestamp) if observation else row.last_observation_at
+            row.updated_at = timestamp
 
     @staticmethod
     def _task_progress(status: str) -> int:
