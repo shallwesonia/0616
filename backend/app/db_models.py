@@ -138,3 +138,254 @@ class ExportJobRecord(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SimulationRunRecord(Base):
+    __tablename__ = "simulation_runs"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "run_id", name="uk_simulation_runs_run_id"),
+        Index("idx_simulation_runs_status", "workspace_id", "status", "created_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Draft")
+    map_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    map_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    scenario_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+
+class SimulationTaskRecord(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "task_id", name="uk_simulation_tasks_task_id"),
+        Index("idx_simulation_tasks_run", "workspace_id", "run_id", "created_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    goal: Mapped[str] = mapped_column(String(512), nullable=False)
+    input_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    constraints_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    expected_outcome: Mapped[str | None] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Ready")
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="simulation-console")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SimulationPlanRecord(Base):
+    __tablename__ = "plans"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "plan_id", name="uk_simulation_plans_plan_id"),
+        Index("idx_simulation_plans_task", "workspace_id", "task_id", "plan_version"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    plan_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    strategy: Mapped[str] = mapped_column(String(128), nullable=False, default="rule")
+    steps_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    dependencies_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    assumptions_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    generated_by: Mapped[str] = mapped_column(String(128), nullable=False, default="rule-agent")
+    generation_latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SimulationPlanStepRecord(Base):
+    __tablename__ = "plan_steps"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "plan_step_id", name="uk_simulation_plan_steps_step_id"),
+        Index("idx_simulation_plan_steps_plan", "workspace_id", "plan_id", "sequence"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    plan_step_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    action_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    params_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    depends_on_json: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    success_condition: Mapped[str | None] = mapped_column(String(512))
+    failure_policy: Mapped[str] = mapped_column(String(128), nullable=False, default="surface_to_operator")
+    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=60000)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Pending")
+
+
+class SimulationActionRecord(Base):
+    __tablename__ = "actions"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "action_id", name="uk_simulation_actions_action_id"),
+        Index("idx_simulation_actions_run", "workspace_id", "run_id", "created_at"),
+        Index("idx_simulation_actions_command", "workspace_id", "command_id"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    plan_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    plan_step_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    action_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    robot_code: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    command: Mapped[str] = mapped_column(String(128), nullable=False)
+    params_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    command_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    timeout_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=60000)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Pending")
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SimulationObservationRecord(Base):
+    __tablename__ = "observations"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "observation_id", name="uk_simulation_observations_observation_id"),
+        Index("idx_simulation_observations_run", "workspace_id", "run_id", "timestamp"),
+        Index("idx_simulation_observations_command", "workspace_id", "command_id"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    action_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    observation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(128), nullable=False)
+    event: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="Event")
+    event_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    message_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    robot_code: Mapped[str | None] = mapped_column(String(128), index=True)
+    command_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    data_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    error_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
+    processing_status: Mapped[str] = mapped_column(String(32), nullable=False, default="Applied")
+
+
+class SimulationCurrentStateRecord(Base):
+    __tablename__ = "current_states"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "run_id", name="uk_simulation_current_states_run_id"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    state_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    task_state_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    active_plan_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
+    robot_states_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    resource_states_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    environment_state_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    pending_actions_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    active_events_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    last_observation_id: Mapped[str | None] = mapped_column(String(128))
+    last_observation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+class SimulationSnapshotRecord(Base):
+    __tablename__ = "snapshots"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "snapshot_id", name="uk_simulation_snapshots_snapshot_id"),
+        Index("idx_simulation_snapshots_run", "workspace_id", "run_id", "created_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    trace_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    state_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+class SimulationTraceHeaderRecord(Base):
+    __tablename__ = "trace_headers"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "trace_id", name="uk_simulation_trace_headers_trace_id"),
+        Index("idx_simulation_trace_headers_run", "workspace_id", "run_id", "started_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Open")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+
+
+class SimulationTraceSpanRecord(Base):
+    __tablename__ = "trace_spans"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "span_id", name="uk_simulation_trace_spans_span_id"),
+        Index("idx_simulation_trace_spans_trace", "workspace_id", "trace_id", "started_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    span_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    parent_span_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    entity_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    operation: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Completed")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    input_ref: Mapped[str | None] = mapped_column(String(256))
+    output_ref: Mapped[str | None] = mapped_column(String(256))
+    error_ref: Mapped[str | None] = mapped_column(String(256))

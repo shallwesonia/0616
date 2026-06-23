@@ -143,3 +143,239 @@ class CommandResponse(BaseModel):
     commandId: str
     topic: str
     payload: dict[str, Any]
+
+
+class ScenarioSummary(BaseModel):
+    scenarioId: str
+    name: str
+    siteMapId: str
+    siteMapVersion: str
+    robotCodes: list[str]
+    robotTypeIds: list[str]
+    actionSet: dict[str, Any]
+    taskFlow: dict[str, Any]
+    resourceProfile: dict[str, Any]
+    map: SiteMap
+
+
+class SimulationRunCreate(BaseModel):
+    scenarioId: str = "default-site-a"
+    name: str | None = None
+
+
+class SimulationRun(BaseModel):
+    runId: str
+    scenarioId: str
+    name: str
+    status: str
+    mapId: str
+    mapVersion: str
+    scenario: dict[str, Any]
+    createdAt: str
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    updatedAt: str
+
+
+class TaskTemplate(BaseModel):
+    templateId: str
+    name: str
+    description: str
+    defaultGoal: str
+    defaultInput: dict[str, Any] = Field(default_factory=dict)
+    supportedCommands: list[str] = Field(default_factory=list)
+
+
+class SimulationTaskCreate(BaseModel):
+    goal: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    priority: int = 5
+    expectedOutcome: str | None = None
+    createdBy: str = "simulation-console"
+
+
+class TaskFromTemplateCreate(BaseModel):
+    templateId: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    createdBy: str = "simulation-console"
+
+
+class PlanStep(BaseModel):
+    planStepId: str
+    sequence: int
+    actionType: str
+    target: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
+    dependsOn: list[str] = Field(default_factory=list)
+    successCondition: str | None = None
+    failurePolicy: str = "surface_to_operator"
+    timeoutMs: int = 60000
+    status: str = "Pending"
+
+
+class SimulationPlan(BaseModel):
+    planId: str
+    runId: str
+    taskId: str
+    traceId: str
+    planVersion: int
+    strategy: str
+    steps: list[PlanStep]
+    dependencies: dict[str, Any] = Field(default_factory=dict)
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    generatedBy: str
+    generationLatencyMs: int
+    status: str
+    createdAt: str
+    activatedAt: str | None = None
+
+
+class SimulationTask(BaseModel):
+    taskId: str
+    runId: str
+    traceId: str
+    goal: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    priority: int
+    expectedOutcome: str | None = None
+    status: str
+    createdBy: str
+    createdAt: str
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    activePlan: SimulationPlan | None = None
+
+
+class ActionCreate(BaseModel):
+    runId: str
+    taskId: str | None = None
+    planId: str | None = None
+    planStepId: str | None = None
+    robotCode: str | None = None
+    command: Literal["goto_pose", "where", "stop"]
+    params: dict[str, Any] = Field(default_factory=dict)
+    timeoutMs: int = 60000
+    operatorId: str = "simulation-console"
+
+
+class SimulationAction(BaseModel):
+    actionId: str
+    runId: str
+    taskId: str | None = None
+    planId: str | None = None
+    planStepId: str | None = None
+    traceId: str
+    robotCode: str
+    command: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    commandId: str | None = None
+    requestId: str | None = None
+    attemptNo: int
+    timeoutMs: int
+    status: str
+    result: dict[str, Any] | None = None
+    createdAt: str
+    issuedAt: str | None = None
+    startedAt: str | None = None
+    finishedAt: str | None = None
+
+
+class Observation(BaseModel):
+    observationId: str
+    runId: str
+    taskId: str | None = None
+    actionId: str | None = None
+    traceId: str | None = None
+    source: str
+    event: str
+    category: str
+    eventId: str | None = None
+    messageId: str | None = None
+    robotCode: str | None = None
+    commandId: str | None = None
+    requestId: str | None = None
+    timestamp: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
+    processingStatus: str = "Applied"
+
+
+class CurrentState(BaseModel):
+    runId: str
+    stateVersion: int
+    taskState: dict[str, Any] = Field(default_factory=dict)
+    activePlan: dict[str, Any] | None = None
+    robotStates: list[dict[str, Any]] = Field(default_factory=list)
+    resourceStates: dict[str, Any] = Field(default_factory=dict)
+    environmentState: dict[str, Any] = Field(default_factory=dict)
+    pendingActions: list[dict[str, Any]] = Field(default_factory=list)
+    activeEvents: list[dict[str, Any]] = Field(default_factory=list)
+    lastObservationId: str | None = None
+    lastObservationAt: str | None = None
+    updatedAt: str
+
+
+class SimulationEventCreate(BaseModel):
+    eventType: Literal[
+        "robot.offline",
+        "action.failed",
+        "path.blocked",
+        "interface.timeout",
+        "message.dropped",
+        "resource.locked",
+        "station.unavailable",
+        "battery.low",
+    ]
+    targetType: Literal["robot", "path", "station", "interface", "message", "resource"] = "robot"
+    targetId: str | None = None
+    severity: Literal["info", "warning", "error", "critical"] = "warning"
+    data: dict[str, Any] = Field(default_factory=dict)
+    durationMs: int | None = None
+    autoRecover: bool = False
+
+
+class SnapshotCreate(BaseModel):
+    reason: str = "manual"
+
+
+class Snapshot(BaseModel):
+    snapshotId: str
+    runId: str
+    taskId: str | None = None
+    traceId: str | None = None
+    stateVersion: int
+    reason: str
+    snapshot: dict[str, Any]
+    checksum: str
+    createdAt: str
+
+
+class TraceSpan(BaseModel):
+    spanId: str
+    parentSpanId: str | None = None
+    traceId: str
+    runId: str
+    taskId: str | None = None
+    entityType: str
+    entityId: str
+    operation: str
+    status: str
+    startedAt: str
+    finishedAt: str | None = None
+    durationMs: int | None = None
+    inputRef: str | None = None
+    outputRef: str | None = None
+    errorRef: str | None = None
+
+
+class TraceResponse(BaseModel):
+    traceId: str
+    runId: str | None = None
+    taskId: str | None = None
+    status: str
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    durationMs: int | None = None
+    spans: list[TraceSpan] = Field(default_factory=list)

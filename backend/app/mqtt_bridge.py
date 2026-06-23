@@ -147,17 +147,18 @@ class PlatformMqttBridge:
         event_name = envelope.get("event", "unknown")
         created_at = envelope.get("timestamp") or utc_now()
         event_id = envelope.get("eventId") or new_id("evt")
-        self.store.append_message(
-            MessageRecord(
-                messageId=event_id,
-                messageType="event",
-                source=envelope.get("source") or "device",
-                topic=topic,
-                createdAt=created_at,
-                payload=envelope,
-            )
+        message_record = MessageRecord(
+            messageId=event_id,
+            messageType="event",
+            source=envelope.get("source") or "device",
+            topic=topic,
+            createdAt=created_at,
+            payload=envelope,
         )
+        self.store.append_message(message_record)
         self._upsert_robot_from_result(robot_code, event_name, envelope, created_at)
+        if hasattr(self.store, "ingest_observation_from_message"):
+            self.store.ingest_observation_from_message(message_record)
 
     def _upsert_robot_from_result(
         self,

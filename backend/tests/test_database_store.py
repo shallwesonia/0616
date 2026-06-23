@@ -2,7 +2,15 @@ from copy import deepcopy
 from uuid import UUID
 
 from backend.app.database_store import DatabaseStore
-from backend.app.schemas import MessageRecord, RobotState
+from backend.app.schemas import (
+    ActionCreate,
+    MessageRecord,
+    RobotState,
+    SimulationEventCreate,
+    SimulationRunCreate,
+    SimulationTaskCreate,
+    SnapshotCreate,
+)
 
 
 WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000099")
@@ -111,3 +119,109 @@ def test_database_store_persists_messages_and_robot_state(tmp_path):
     robots = {item.robotId: item for item in store.robots()}
     assert robots["DOG-DB"].state == "idle"
     assert robots["DOG-DB"].progress == 100
+
+
+def test_database_store_p3_simulation_run_chain(tmp_path):
+    store = create_store(tmp_path)
+
+    scenario = store.list_scenarios()[0]
+    run = store.create_simulation_run(SimulationRunCreate(scenarioId=scenario.scenarioId, name="P3 test run"))
+    assert run.runId.startswith("RUN-")
+    assert run.status == "Draft"
+
+    started = store.update_simulation_run_status(run.runId, "Running")
+    assert started is not None
+    assert started.status == "Running"
+
+    task = store.create_simulation_task(
+        run.runId,
+        SimulationTaskCreate(
+            goal="Move to sort station",
+            input={"command": "goto_pose", "target": {"x": 760, "y": 420, "z": 0, "yaw": 0}},
+        ),
+    )
+    assert task is not None
+    assert task.activePlan is not None
+    assert task.activePlan.steps[0].actionType == "goto_pose"
+
+    action = store.create_action(
+        ActionCreate(
+            runId=run.runId,
+            taskId=task.taskId,
+            command="goto_pose",
+            params={"x": 760, "y": 420, "z": 0, "yaw": 0},
+        )
+    )
+    assert action is not None
+    issued = store.mark_action_issued(
+        action.actionId,
+        "CMD-P3-001",
+        None,
+        {"mqttPublished": False, "commandId": "CMD-P3-001"},
+    )
+    assert issued is not None
+    assert issued.status == "Issued"
+
+    result_message = MessageRecord(
+        messageId="EVT-P3-001",
+        messageType="event",
+        source="device",
+        topic="factory/dogs/robot-001/result",
+        createdAt="2026-06-23T00:00:00+00:00",
+        payload={
+            "schemaVersion": "1.0",
+            "messageType": "event",
+            "event": "task.succeeded",
+            "eventId": "EVT-P3-001",
+            "commandId": "CMD-P3-001",
+            "taskId": task.taskId,
+            "requestId": None,
+            "robotCode": "robot-001",
+            "traceId": task.traceId,
+            "source": "device",
+            "timestamp": "2026-06-23T00:00:00+00:00",
+            "data": {"x": 760, "y": 420},
+            "error": None,
+        },
+    )
+    store.append_message(result_message)
+    observation = store.ingest_observation_from_message(result_message)
+    assert observation is not None
+    assert observation.category == "Event"
+    assert observation.actionId == action.actionId
+
+    completed_action = store.get_action(action.actionId)
+    assert completed_action is not None
+    assert completed_action.status == "Succeeded"
+    completed_task = store.get_task(task.taskId)
+    assert completed_task is not None
+    assert completed_task.status == "Succeeded"
+
+    alert = store.inject_simulation_event(
+        run.runId,
+        SimulationEventCreate(eventType="path.blocked", targetType="path", targetId="edge-2", severity="error"),
+    )
+    assert alert is not None
+    assert alert.category == "Alert"
+
+    state = store.get_current_state(run.runId)
+    assert state is not None
+    assert state.stateVersion >= 4
+    assert "edge-2" in state.resourceStates["blockedPaths"]
+    assert state.activeEvents[0]["event"] == "path.blocked"
+
+    snapshot = store.create_snapshot(run.runId, SnapshotCreate(reason="test-checkpoint"))
+    assert snapshot is not None
+    assert snapshot.stateVersion == state.stateVersion
+    assert store.list_snapshots(run.runId)[0].snapshotId == snapshot.snapshotId
+
+    trace = store.get_trace(task.traceId)
+    assert trace.status == "Open"
+    assert any(span.operation == "command.issued" for span in trace.spans)
+    assert any(span.operation == "observation.task.succeeded" for span in trace.spans)
+
+    exported = store.export_simulation_run(run.runId)
+    assert exported is not None
+    assert exported["manifest"]["secretPolicy"] == "secrets-excluded"
+    assert exported["run"]["runId"] == run.runId
+    assert exported["observations"]

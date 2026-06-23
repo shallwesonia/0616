@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapEditor } from "./components/MapEditor";
+import { SimulationDashboard } from "./SimulationDashboard";
 import { Badge, Button, Panel } from "./components/ui";
 import {
   createCommand,
@@ -87,6 +88,10 @@ const fallbackRobots: RobotState[] = [
 ];
 
 export default function App() {
+  if (window.location.pathname === "/simulation") {
+    return <SimulationDashboard />;
+  }
+
   const [map, setMap] = useState<SiteMap>(fallbackMap);
   const [robots, setRobots] = useState<RobotState[]>(fallbackRobots);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
@@ -319,6 +324,10 @@ export default function App() {
             </h1>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => (window.location.href = "/simulation")}>
+              <Activity size={16} />
+              仿真驾驶舱
+            </Button>
             <Button variant="secondary" onClick={handleSaveDraft}>
               <Save size={16} />
               保存草稿

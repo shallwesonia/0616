@@ -19,11 +19,26 @@ from .schemas import (
     DraftResponse,
     ExportCreate,
     ExportResponse,
+    ActionCreate,
+    CurrentState,
     MapImportResponse,
     MapDraftCreate,
     MessageRecord,
+    Observation,
     RobotState,
+    ScenarioSummary,
     SiteMap,
+    SimulationAction,
+    SimulationEventCreate,
+    SimulationRun,
+    SimulationRunCreate,
+    SimulationTask,
+    SimulationTaskCreate,
+    Snapshot,
+    SnapshotCreate,
+    TaskFromTemplateCreate,
+    TaskTemplate,
+    TraceResponse,
     ValidationResponse,
     new_id,
     protocol_id,
@@ -250,6 +265,8 @@ def list_messages(
 @app.post("/api/v1/messages", response_model=MessageRecord)
 def create_message(message: MessageRecord) -> MessageRecord:
     store.append_message(message)
+    if hasattr(store, "ingest_observation_from_message"):
+        store.ingest_observation_from_message(message)
     return message
 
 
@@ -279,8 +296,7 @@ def _command_source(source: str) -> str:
     return source if source in allowed_sources else "api"
 
 
-@app.post("/api/v1/commands", response_model=CommandResponse)
-def create_command(command: CommandCreate) -> CommandResponse:
+def _issue_command(command: CommandCreate) -> CommandResponse:
     robot_code = command.robotCode or command.robotId
     if not robot_code:
         raise HTTPException(status_code=400, detail="robotCode or robotId is required")
@@ -329,6 +345,11 @@ def create_command(command: CommandCreate) -> CommandResponse:
     published = bridge.publish_command(topic, payload)
     response_payload = {**payload, "mqttPublished": published}
     return CommandResponse(commandId=command_id, topic=topic, payload=response_payload)
+
+
+@app.post("/api/v1/commands", response_model=CommandResponse)
+def create_command(command: CommandCreate) -> CommandResponse:
+    return _issue_command(command)
 
 
 @app.get("/api/v1/commands/{command_id}/trace")
@@ -397,6 +418,267 @@ def download_export(file_name: str) -> FileResponse:
 @app.get("/api/v1/mqtt/contract")
 def get_mqtt_contract() -> dict:
     return MQTT_CONTRACT
+
+
+@app.get("/api/v1/scenarios", response_model=list[ScenarioSummary])
+def list_scenarios() -> list[ScenarioSummary]:
+    return store.list_scenarios()
+
+
+@app.get("/api/v1/scenarios/{scenario_id}", response_model=ScenarioSummary)
+def get_scenario(scenario_id: str) -> ScenarioSummary:
+    scenario = store.get_scenario(scenario_id)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="scenario not found")
+    return scenario
+
+
+@app.get("/api/v1/task-templates", response_model=list[TaskTemplate])
+def list_task_templates() -> list[TaskTemplate]:
+    return store.list_task_templates()
+
+
+@app.post("/api/v1/simulation-runs", response_model=SimulationRun)
+def create_simulation_run(request: SimulationRunCreate) -> SimulationRun:
+    try:
+        return store.create_simulation_run(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/simulation-runs", response_model=list[SimulationRun])
+def list_simulation_runs(limit: int = 20) -> list[SimulationRun]:
+    return store.list_simulation_runs(limit=limit)
+
+
+@app.get("/api/v1/simulation-runs/{run_id}", response_model=SimulationRun)
+def get_simulation_run(run_id: str) -> SimulationRun:
+    run = store.get_simulation_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return run
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/start", response_model=SimulationRun)
+def start_simulation_run(run_id: str) -> SimulationRun:
+    run = store.update_simulation_run_status(run_id, "Running")
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return run
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/pause", response_model=SimulationRun)
+def pause_simulation_run(run_id: str) -> SimulationRun:
+    run = store.update_simulation_run_status(run_id, "Paused")
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return run
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/resume", response_model=SimulationRun)
+def resume_simulation_run(run_id: str) -> SimulationRun:
+    run = store.update_simulation_run_status(run_id, "Running")
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return run
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/stop", response_model=SimulationRun)
+def stop_simulation_run(run_id: str) -> SimulationRun:
+    run = store.update_simulation_run_status(run_id, "Stopped")
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return run
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/tasks", response_model=SimulationTask)
+def create_simulation_task(run_id: str, request: SimulationTaskCreate) -> SimulationTask:
+    task = store.create_simulation_task(run_id, request)
+    if task is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return task
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/tasks/from-template", response_model=SimulationTask)
+def create_simulation_task_from_template(run_id: str, request: TaskFromTemplateCreate) -> SimulationTask:
+    task = store.create_task_from_template(run_id, request)
+    if task is None:
+        raise HTTPException(status_code=404, detail="simulation run or task template not found")
+    return task
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/tasks", response_model=list[SimulationTask])
+def list_simulation_run_tasks(run_id: str) -> list[SimulationTask]:
+    return store.list_run_tasks(run_id)
+
+
+@app.get("/api/v1/tasks/{task_id}", response_model=SimulationTask)
+def get_task(task_id: str) -> SimulationTask:
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return task
+
+
+@app.get("/api/v1/tasks/{task_id}/plans")
+def list_task_plans(task_id: str) -> list[dict]:
+    return [plan.model_dump() for plan in store.list_task_plans(task_id)]
+
+
+@app.post("/api/v1/actions", response_model=SimulationAction)
+def create_action(request: ActionCreate) -> SimulationAction:
+    action = store.create_action(request)
+    if action is None:
+        raise HTTPException(status_code=404, detail="simulation run or task not found")
+    command_response = _issue_command(
+        CommandCreate(
+            robotCode=action.robotCode,
+            command=action.command,
+            params=action.params,
+            timeoutMs=action.timeoutMs,
+            issuedBy="agent",
+            operatorId=request.operatorId,
+            taskId=action.taskId,
+            traceId=action.traceId,
+        )
+    )
+    issued = store.mark_action_issued(
+        action.actionId,
+        command_response.commandId,
+        command_response.payload.get("requestId"),
+        command_response.payload,
+    )
+    if issued is None:
+        raise HTTPException(status_code=500, detail="action issue state lost")
+    return issued
+
+
+@app.get("/api/v1/actions", response_model=list[SimulationAction])
+def list_actions(runId: str | None = None, taskId: str | None = None, limit: int = 100) -> list[SimulationAction]:
+    return store.list_actions(run_id=runId, task_id=taskId, limit=limit)
+
+
+@app.get("/api/v1/actions/{action_id}", response_model=SimulationAction)
+def get_action(action_id: str) -> SimulationAction:
+    action = store.get_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    return action
+
+
+@app.post("/api/v1/actions/{action_id}/stop", response_model=SimulationAction)
+def stop_action(action_id: str) -> SimulationAction:
+    action = store.stop_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    return action
+
+
+@app.get("/api/v1/current-states/{run_id}", response_model=CurrentState)
+def get_current_state(run_id: str) -> CurrentState:
+    state = store.get_current_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="current state not found")
+    return state
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/robots", response_model=list[RobotState])
+def list_simulation_run_robots(run_id: str) -> list[RobotState]:
+    if store.get_simulation_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return store.robots()
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/resources")
+def list_simulation_run_resources(run_id: str) -> dict:
+    state = store.get_current_state(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="current state not found")
+    return state.resourceStates
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/messages", response_model=list[MessageRecord])
+def list_simulation_run_messages(
+    run_id: str,
+    limit: int = 100,
+    category: str | None = None,
+) -> list[MessageRecord]:
+    return store.list_run_messages(run_id, limit=limit, category=category)
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/observations", response_model=list[Observation])
+def list_simulation_run_observations(run_id: str, limit: int = 100) -> list[Observation]:
+    return store.list_observations(run_id, limit=limit)
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/events", response_model=Observation)
+def inject_simulation_event(run_id: str, request: SimulationEventCreate) -> Observation:
+    observation = store.inject_simulation_event(run_id, request)
+    if observation is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return observation
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/snapshots", response_model=Snapshot)
+def create_simulation_snapshot(run_id: str, request: SnapshotCreate) -> Snapshot:
+    snapshot = store.create_snapshot(run_id, request)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="current state not found")
+    return snapshot
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/snapshots", response_model=list[Snapshot])
+def list_simulation_snapshots(run_id: str) -> list[Snapshot]:
+    return store.list_snapshots(run_id)
+
+
+@app.get("/api/v1/traces/{trace_id}", response_model=TraceResponse)
+def get_trace(trace_id: str) -> TraceResponse:
+    trace = store.get_trace(trace_id)
+    if trace.status == "NotFound":
+        raise HTTPException(status_code=404, detail="trace not found")
+    return trace
+
+
+@app.get("/api/v1/traces/{trace_id}/spans", response_model=list)
+def get_trace_spans(trace_id: str) -> list:
+    trace = get_trace(trace_id)
+    return [span.model_dump() for span in trace.spans]
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/export")
+def export_simulation_run(run_id: str) -> dict:
+    payload = store.export_simulation_run(run_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return payload
+
+
+@app.websocket("/ws/v1/workspaces/{workspace_id}/runs/{run_id}")
+async def simulation_run_socket(websocket: WebSocket, workspace_id: str, run_id: str) -> None:
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(
+                {
+                    "messageId": new_id("ws"),
+                    "type": "simulation.snapshot",
+                    "workspaceId": workspace_id,
+                    "runId": run_id,
+                    "timestamp": utc_now(),
+                    "data": {
+                        "run": store.get_simulation_run(run_id).model_dump() if store.get_simulation_run(run_id) else None,
+                        "currentState": store.get_current_state(run_id).model_dump() if store.get_current_state(run_id) else None,
+                        "tasks": [task.model_dump() for task in store.list_run_tasks(run_id)],
+                        "actions": [action.model_dump() for action in store.list_actions(run_id=run_id, limit=20)],
+                        "messages": [message.model_dump() for message in store.list_run_messages(run_id, limit=20)],
+                        "observations": [item.model_dump() for item in store.list_observations(run_id, limit=20)],
+                    },
+                }
+            )
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        return
 
 
 @app.websocket("/ws/v1/sessions/{session_id}")

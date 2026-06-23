@@ -132,3 +132,200 @@ export interface MqttContract {
     events: string[];
   };
 }
+
+export interface ScenarioSummary {
+  scenarioId: string;
+  name: string;
+  siteMapId: string;
+  siteMapVersion: string;
+  robotCodes: string[];
+  robotTypeIds: string[];
+  actionSet: Record<string, unknown> & { commands?: string[] };
+  taskFlow: Record<string, unknown>;
+  resourceProfile: Record<string, unknown>;
+  map: SiteMap;
+}
+
+export interface TaskTemplate {
+  templateId: string;
+  name: string;
+  description: string;
+  defaultGoal: string;
+  defaultInput: Record<string, unknown>;
+  supportedCommands: string[];
+}
+
+export interface PlanStep {
+  planStepId: string;
+  sequence: number;
+  actionType: string;
+  target: Record<string, unknown>;
+  params: Record<string, unknown>;
+  dependsOn: string[];
+  successCondition?: string | null;
+  failurePolicy: string;
+  timeoutMs: number;
+  status: string;
+}
+
+export interface SimulationPlan {
+  planId: string;
+  runId: string;
+  taskId: string;
+  traceId: string;
+  planVersion: number;
+  strategy: string;
+  steps: PlanStep[];
+  dependencies: Record<string, unknown>;
+  assumptions: Record<string, unknown>;
+  generatedBy: string;
+  generationLatencyMs: number;
+  status: string;
+  createdAt: string;
+  activatedAt?: string | null;
+}
+
+export interface SimulationTask {
+  taskId: string;
+  runId: string;
+  traceId: string;
+  goal: string;
+  input: Record<string, unknown>;
+  constraints: Record<string, unknown>;
+  priority: number;
+  expectedOutcome?: string | null;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  activePlan?: SimulationPlan | null;
+}
+
+export interface SimulationRun {
+  runId: string;
+  scenarioId: string;
+  name: string;
+  status: string;
+  mapId: string;
+  mapVersion: string;
+  scenario: Record<string, unknown>;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface SimulationAction {
+  actionId: string;
+  runId: string;
+  taskId?: string | null;
+  planId?: string | null;
+  planStepId?: string | null;
+  traceId: string;
+  robotCode: string;
+  command: string;
+  params: Record<string, unknown>;
+  commandId?: string | null;
+  requestId?: string | null;
+  attemptNo: number;
+  timeoutMs: number;
+  status: string;
+  result?: Record<string, unknown> | null;
+  createdAt: string;
+  issuedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}
+
+export interface Observation {
+  observationId: string;
+  runId: string;
+  taskId?: string | null;
+  actionId?: string | null;
+  traceId?: string | null;
+  source: string;
+  event: string;
+  category: "Ack" | "Telemetry" | "Event" | "Alert" | string;
+  eventId?: string | null;
+  messageId?: string | null;
+  robotCode?: string | null;
+  commandId?: string | null;
+  requestId?: string | null;
+  timestamp: string;
+  data: Record<string, unknown>;
+  error?: Record<string, unknown> | null;
+  processingStatus: string;
+}
+
+export interface CurrentState {
+  runId: string;
+  stateVersion: number;
+  taskState: Record<string, unknown>;
+  activePlan?: Record<string, unknown> | null;
+  robotStates: Array<Record<string, unknown>>;
+  resourceStates: Record<string, unknown>;
+  environmentState: Record<string, unknown>;
+  pendingActions: Array<Record<string, unknown>>;
+  activeEvents: Array<Record<string, unknown>>;
+  lastObservationId?: string | null;
+  lastObservationAt?: string | null;
+  updatedAt: string;
+}
+
+export interface Snapshot {
+  snapshotId: string;
+  runId: string;
+  taskId?: string | null;
+  traceId?: string | null;
+  stateVersion: number;
+  reason: string;
+  snapshot: Record<string, unknown>;
+  checksum: string;
+  createdAt: string;
+}
+
+export interface TraceSpan {
+  spanId: string;
+  parentSpanId?: string | null;
+  traceId: string;
+  runId: string;
+  taskId?: string | null;
+  entityType: string;
+  entityId: string;
+  operation: string;
+  status: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  inputRef?: string | null;
+  outputRef?: string | null;
+  errorRef?: string | null;
+}
+
+export interface TraceResponse {
+  traceId: string;
+  runId?: string | null;
+  taskId?: string | null;
+  status: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  spans: TraceSpan[];
+}
+
+export interface SimulationSnapshot {
+  messageId: string;
+  type: "simulation.snapshot";
+  workspaceId: string;
+  runId: string;
+  timestamp: string;
+  data: {
+    run: SimulationRun | null;
+    currentState: CurrentState | null;
+    tasks: SimulationTask[];
+    actions: SimulationAction[];
+    messages: MessageRecord[];
+    observations: Observation[];
+  };
+}
