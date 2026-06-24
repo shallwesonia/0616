@@ -1,6 +1,8 @@
 from copy import deepcopy
 from uuid import UUID
 
+import pytest
+
 from backend.app.database_store import DatabaseStore
 from backend.app.schemas import (
     ActionCreate,
@@ -27,6 +29,50 @@ def create_store(tmp_path) -> DatabaseStore:
         state_path=tmp_path / "missing-state.json",
         create_schema=True,
     )
+
+
+def test_database_store_seeds_multi_robot_scenario(tmp_path):
+    store = create_store(tmp_path)
+
+    robot_codes = [robot.robotId for robot in store.robots()]
+    assert robot_codes[:3] == ["robot-001", "robot-002", "robot-003"]
+
+    scenario = store.list_scenarios()[0]
+    assert scenario.robotCodes == ["robot-001", "robot-002", "robot-003"]
+    assert [robot["robotCode"] for robot in scenario.robots] == ["robot-001", "robot-002", "robot-003"]
+
+    run = store.create_simulation_run(SimulationRunCreate(scenarioId=scenario.scenarioId, name="multi robot seed"))
+    state = store.get_current_state(run.runId)
+    assert state is not None
+    assert [robot["robotId"] for robot in state.robotStates] == ["robot-001", "robot-002", "robot-003"]
+
+
+def test_create_action_targets_requested_robot_code(tmp_path):
+    store = create_store(tmp_path)
+    scenario = store.list_scenarios()[0]
+    run = store.create_simulation_run(SimulationRunCreate(scenarioId=scenario.scenarioId, name="multi robot action"))
+
+    action = store.create_action(
+        ActionCreate(
+            runId=run.runId,
+            robotCode="robot-002",
+            command="where",
+            params={},
+        )
+    )
+
+    assert action is not None
+    assert action.robotCode == "robot-002"
+
+    with pytest.raises(ValueError, match="unknown robotCode"):
+        store.create_action(
+            ActionCreate(
+                runId=run.runId,
+                robotCode="robot-missing",
+                command="where",
+                params={},
+            )
+        )
 
 
 def test_database_store_seeds_and_publishes_map(tmp_path):

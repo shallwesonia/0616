@@ -119,23 +119,48 @@ DEFAULT_MAP: dict[str, Any] = {
 }
 
 
+def default_robot_states(now: str | None = None) -> list[dict[str, Any]]:
+    timestamp = now or utc_now()
+    return [
+        {
+            "robotId": "robot-001",
+            "robotType": "machine-dog",
+            "state": "Idle",
+            "x": 220,
+            "y": 360,
+            "progress": 0,
+            "currentAction": "Waiting for command",
+            "updatedAt": timestamp,
+        },
+        {
+            "robotId": "robot-002",
+            "robotType": "machine-dog",
+            "state": "Idle",
+            "x": 320,
+            "y": 360,
+            "progress": 0,
+            "currentAction": "Waiting for command",
+            "updatedAt": timestamp,
+        },
+        {
+            "robotId": "robot-003",
+            "robotType": "machine-dog",
+            "state": "Idle",
+            "x": 420,
+            "y": 360,
+            "progress": 0,
+            "currentAction": "Waiting for command",
+            "updatedAt": timestamp,
+        },
+    ]
+
+
 def default_state() -> dict[str, Any]:
     now = utc_now()
     return {
         "map": DEFAULT_MAP,
         "drafts": {},
-        "robots": [
-            {
-                "robotId": "robot-001",
-                "robotType": "machine-dog",
-                "state": "Idle",
-                "x": 220,
-                "y": 360,
-                "progress": 0,
-                "currentAction": "Waiting for command",
-                "updatedAt": now,
-            }
-        ],
+        "robots": default_robot_states(now),
         "messages": [
             {
                 "messageId": new_id("msg"),
@@ -294,6 +319,21 @@ class JsonStore:
 
     def runtime_robots(self) -> list[RobotState]:
         return self.robots()
+
+    def create_robot(self, robot: RobotState) -> RobotState:
+        state = self.read()
+        if any(item["robotId"] == robot.robotId for item in state["robots"]):
+            raise ValueError(f"robotCode already exists: {robot.robotId}")
+        state["robots"].append(robot.model_dump())
+        self.append_audit_to_state(
+            state,
+            "robot.created",
+            "robot",
+            robot.robotId,
+            after=robot.model_dump(),
+        )
+        self.write(state)
+        return robot
 
     def messages(self, limit: int = 100) -> list[MessageRecord]:
         records = self.read()["messages"]

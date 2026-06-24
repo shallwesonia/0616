@@ -67,7 +67,7 @@ from .schemas import (
     utc_now,
     validate_action_params,
 )
-from .store import DATA_DIR, DEFAULT_MAP, EXPORT_DIR, STATE_PATH, JsonStore, default_state
+from .store import DATA_DIR, DEFAULT_MAP, EXPORT_DIR, STATE_PATH, JsonStore, default_robot_states, default_state
 
 
 def parse_datetime(value: str | datetime | None) -> datetime:
@@ -131,6 +131,7 @@ class DatabaseStore(JsonStore):
         if create_schema:
             Base.metadata.create_all(self.database.engine)
         self.seed_if_empty()
+        self.ensure_default_robot_fleet()
         self.runtime_cache.warm(self.robots(), self.messages(limit=self.runtime_cache.message_limit))
 
     def seed_if_empty(self) -> None:
@@ -201,6 +202,21 @@ class DatabaseStore(JsonStore):
             with self.state_path.open("r", encoding="utf-8") as file:
                 return json.load(file)
         return default_state()
+
+    def ensure_default_robot_fleet(self) -> None:
+        default_robots = [RobotState.model_validate(robot) for robot in default_robot_states()]
+        with self.database.session() as session:
+            existing_codes = set(
+                session.scalars(
+                    select(RobotInstanceRecord.robot_code).where(
+                        RobotInstanceRecord.workspace_id == self.workspace_id
+                    )
+                ).all()
+            )
+            for robot in default_robots:
+                if robot.robotId not in existing_codes:
+                    session.add(self._robot_row(robot))
+                    existing_codes.add(robot.robotId)
 
     def current_map(self) -> SiteMap:
         with self.database.session() as session:
@@ -452,6 +468,27 @@ class DatabaseStore(JsonStore):
                 row.current_action = robot.currentAction
                 row.updated_at = parse_datetime(robot.updatedAt)
         self.runtime_cache.set_robot(robot)
+
+    def create_robot(self, robot: RobotState) -> RobotState:
+        with self.database.session() as session:
+            existing = session.scalar(
+                select(RobotInstanceRecord.id).where(
+                    RobotInstanceRecord.workspace_id == self.workspace_id,
+                    RobotInstanceRecord.robot_code == robot.robotId,
+                )
+            )
+            if existing is not None:
+                raise ValueError(f"robotCode already exists: {robot.robotId}")
+            session.add(self._robot_row(robot))
+            self._add_audit(
+                session,
+                "robot.created",
+                "robot",
+                robot.robotId,
+                after=robot.model_dump(),
+            )
+        self.runtime_cache.set_robot(robot)
+        return robot
 
     def create_export(self, export_type: str) -> tuple[str, str]:
         export_id = new_id("export")
@@ -874,6 +911,14 @@ class DatabaseStore(JsonStore):
         robot_code = request.robotCode or self._default_robot_code()
         params = validate_action_params(request.command, request.params)
         with self.database.session() as session:
+            robot_exists = session.scalar(
+                select(func.count()).select_from(RobotInstanceRecord).where(
+                    RobotInstanceRecord.workspace_id == self.workspace_id,
+                    RobotInstanceRecord.robot_code == robot_code,
+                )
+            )
+            if not robot_exists:
+                raise ValueError(f"unknown robotCode: {robot_code}")
             run = self._run_row(session, request.runId)
             if run is None:
                 return None
@@ -1532,6 +1577,16 @@ class DatabaseStore(JsonStore):
             siteMapId=current_map.id,
             siteMapVersion=current_map.configVersion,
             robotCodes=robot_codes,
+            robots=[
+                {
+                    "robotCode": robot.robotId,
+                    "robotType": robot.robotType,
+                    "initialPose": {"x": robot.x, "y": robot.y},
+                    "state": robot.state,
+                    "capabilities": action_command_names(),
+                }
+                for robot in robots
+            ],
             robotTypeIds=sorted({robot.robotType for robot in robots}) or ["machine-dog"],
             actionSet={"actionSetId": "machine-dog-basic", "commands": action_command_names()},
             taskFlow={"taskFlowId": "basic-task-flow", "modes": ["manual", "template"]},

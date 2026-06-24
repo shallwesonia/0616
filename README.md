@@ -36,6 +36,8 @@ Docker 环境默认使用 PostgreSQL 主存储，容器启动时先自动执行 
 
 Redis 用于最新机器人状态、最近消息缓冲和 Workspace 事件发布。Redis 是可重建辅助缓存，故障时 API 与 WebSocket 回退 PostgreSQL。数据库备份写入 `data/backups`，标准流程见 `.codex/docs/数据库备份恢复与初始化_20260622.md`。
 
+Docker Compose 默认启动 3 个独立虚拟机器狗执行体：`robot-001`、`robot-002`、`robot-003`。三者共用当前 Workspace MQTT Broker，但使用各自的 `ROBOT_CODE` 和 MQTT clientId，平台按 `robotCode` 聚合状态和下发 Action。
+
 本机访问：
 
 - 前端：`http://localhost:5173`
@@ -58,7 +60,7 @@ Redis 用于最新机器人状态、最近消息缓冲和 Workspace 事件发布
 - 前端负责二维环境编辑和运行态展示，不直接下发机器人控制指令。
 - 平台 API 负责配置草稿、校验、发布、导入导出、消息记录和 MQTT 桥接。
 - 平台 API 的地图、草稿、机器人状态、消息、导出任务和审计记录由 PostgreSQL 持久化，并按 `WORKSPACE_ID` 隔离。
-- 虚拟机器狗执行体是独立服务，只依赖 MQTT 契约，后续可替换为真实机器狗网关。
+- 虚拟机器狗执行体是独立服务，只依赖 MQTT 契约；当前默认部署 3 个执行体实例，后续可逐台替换为真实机器狗网关。
 - MQTT 对外接口按机器狗 command/result 标准：`factory/dogs/{robotCode}/command`、`factory/dogs/{robotCode}/result`。
 - 第一阶段固定支持 `goto_pose`、`stop`、`where` 三类命令。
 - 动作耗时使用动作配置区间随机生成，默认 `goto_pose` 为 30-35 秒。

@@ -100,6 +100,34 @@ def test_command_endpoint_records_command_without_mqtt():
         assert trace.json()["messageCount"] >= 1
 
 
+def test_robot_create_endpoint_adds_scenario_robot(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-robot-create.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000087"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/robots",
+            json={"robotCode": "robot-010", "robotType": "machine-dog", "x": 520, "y": 360},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["robotId"] == "robot-010"
+        assert payload["x"] == 520
+
+        duplicate = client.post(
+            "/api/v1/robots",
+            json={"robotCode": "robot-010", "robotType": "machine-dog", "x": 520, "y": 360},
+        )
+        assert duplicate.status_code == 409
+
+        scenarios = client.get("/api/v1/scenarios").json()
+        assert "robot-010" in scenarios[0]["robotCodes"]
+
+
 def test_command_stop_creates_new_robot_control_action(tmp_path, monkeypatch):
     test_store = DatabaseStore(
         database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-stop-semantics.db').as_posix()}",

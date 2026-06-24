@@ -31,6 +31,7 @@ from .schemas import (
     MessageReplayCreate,
     MessageReplayResponse,
     Observation,
+    RobotCreate,
     RobotState,
     ScenarioSummary,
     ScenarioValidationResponse,
@@ -227,6 +228,35 @@ def import_map(request: MapDraftCreate) -> MapImportResponse:
 @app.get("/api/v1/robots", response_model=list[RobotState])
 def list_robots() -> list[RobotState]:
     return store.robots()
+
+
+@app.post("/api/v1/robots", response_model=RobotState)
+def create_robot(request: RobotCreate) -> RobotState:
+    robot = RobotState(
+        robotId=request.robotCode,
+        robotType=request.robotType,
+        state=request.state,
+        x=request.x,
+        y=request.y,
+        progress=0,
+        currentAction=request.currentAction,
+        updatedAt=utc_now(),
+    )
+    try:
+        created = store.create_robot(robot)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    store.append_message(
+        MessageRecord(
+            messageId=new_id("msg"),
+            messageType="system",
+            source="platform-api",
+            topic=f"api/robots/{created.robotId}/created",
+            createdAt=created.updatedAt,
+            payload=created.model_dump(),
+        )
+    )
+    return created
 
 
 @app.post("/api/v1/robots/{robot_id}/state", response_model=RobotState)

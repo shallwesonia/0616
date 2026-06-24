@@ -277,6 +277,15 @@ class RobotState(BaseModel):
     updatedAt: str
 
 
+class RobotCreate(BaseModel):
+    robotCode: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    robotType: str = Field(default="machine-dog", min_length=1, max_length=64)
+    x: float = 220
+    y: float = 360
+    state: str = "Idle"
+    currentAction: str = "Waiting for command"
+
+
 class MessageRecord(BaseModel):
     messageId: str
     messageType: str
@@ -354,6 +363,7 @@ class ScenarioSummary(BaseModel):
     siteMapId: str
     siteMapVersion: str
     robotCodes: list[str]
+    robots: list[dict[str, Any]] = Field(default_factory=list)
     robotTypeIds: list[str]
     actionSet: dict[str, Any]
     taskFlow: dict[str, Any]

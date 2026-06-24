@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Pause,
   Play,
+  Plus,
   Radio,
   RefreshCw,
   RotateCcw,
@@ -29,6 +30,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Panel } from "./components/ui";
 import {
+  createRobot,
   createSimulationAction,
   createSimulationRun,
   createSimulationSnapshot,
@@ -143,6 +145,10 @@ export function SimulationDashboard() {
   const [exceptionDurationMs, setExceptionDurationMs] = useState(0);
   const [exceptionAutoRecover, setExceptionAutoRecover] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState<(typeof recoveryModes)[number]["value"]>("manual");
+  const [newRobotCode, setNewRobotCode] = useState("");
+  const [newRobotType, setNewRobotType] = useState("machine-dog");
+  const [newRobotX, setNewRobotX] = useState(520);
+  const [newRobotY, setNewRobotY] = useState(360);
   const [status, setStatus] = useState("仿真驾驶舱待连接");
 
   const selectedScenario = useMemo(
@@ -162,6 +168,11 @@ export function SimulationDashboard() {
     ?? activeTask?.activePlan?.steps[0]
     ?? null;
   const robots = useMemo(() => robotsFromState(currentState, selectedScenario), [currentState, selectedScenario]);
+  const availableRobotCodes = useMemo(() => {
+    const scenarioRobotCodes = selectedScenario?.robotCodes ?? [];
+    const robotCodes = scenarioRobotCodes.length ? scenarioRobotCodes : robots.map((robot) => robot.robotId);
+    return Array.from(new Set(robotCodes.length ? robotCodes : ["robot-001"]));
+  }, [robots, selectedScenario]);
   const filteredMessages = useMemo(() => {
     if (messageFilter === "All") {
       return messages;
@@ -172,7 +183,11 @@ export function SimulationDashboard() {
     () => messages.find((message) => message.messageId === selectedMessageId) ?? filteredMessages[0] ?? null,
     [filteredMessages, messages, selectedMessageId]
   );
-  const effectiveRobotCode = selectedRobotCode || selectedScenario?.robotCodes[0] || robots[0]?.robotId || "robot-001";
+  const effectiveRobotCode = selectedRobotCode || availableRobotCodes[0] || robots[0]?.robotId || "robot-001";
+  const selectedRobot = robots.find((robot) => robot.robotId === effectiveRobotCode) ?? robots[0] ?? null;
+  const selectedExceptionOption = exceptionOptions.find((item) => item.value === exceptionType) ?? exceptionOptions[0];
+  const visibleActionQueue = taskActions.length ? taskActions : actions;
+  const suggestedRobotCode = useMemo(() => nextRobotCode(availableRobotCodes), [availableRobotCodes]);
   const scenarioCheckSummary = useMemo(() => {
     const checks = scenarioValidation?.checks ?? [];
     return {
@@ -306,6 +321,18 @@ export function SimulationDashboard() {
   }, [selectedCommandSpec?.command]);
 
   useEffect(() => {
+    if (!newRobotCode) {
+      setNewRobotCode(suggestedRobotCode);
+    }
+  }, [newRobotCode, suggestedRobotCode]);
+
+  useEffect(() => {
+    if (selectedExceptionOption.targetType === "robot" && effectiveRobotCode) {
+      setExceptionTarget(effectiveRobotCode);
+    }
+  }, [effectiveRobotCode, selectedExceptionOption.targetType]);
+
+  useEffect(() => {
     if (!run) {
       return;
     }
@@ -361,6 +388,38 @@ export function SimulationDashboard() {
     setRuns([started, ...runs]);
     setStatus(`已创建运行 ${started.runId}`);
     await refreshRun(started.runId);
+  }
+
+  async function handleCreateRobot() {
+    const robotCode = newRobotCode.trim();
+    const robotType = newRobotType.trim() || "machine-dog";
+    if (!robotCode) {
+      setStatus("请输入机器人编号");
+      return;
+    }
+    try {
+      const robot = await createRobot({
+        robotCode,
+        robotType,
+        x: newRobotX,
+        y: newRobotY,
+        state: "Idle",
+        currentAction: "Waiting for command"
+      });
+      const nextScenarios = await getScenarios();
+      setScenarios(nextScenarios);
+      setSelectedRobotCode(robot.robotId);
+      setExceptionTarget(robot.robotId);
+      setNewRobotCode(nextRobotCode([...availableRobotCodes, robot.robotId]));
+      setNewRobotX((current) => current + 100);
+      setStatus(`已添加机器人 ${robot.robotId}`);
+      await handleValidateScenario(selectedScenarioId, false);
+      if (run) {
+        await refreshRun(run.runId);
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "新增机器人失败");
+    }
   }
 
   async function handleStopRun() {
@@ -688,9 +747,41 @@ export function SimulationDashboard() {
                   校验场景
                 </Button>
               </div>
+              <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-neutral-800">
+                    <Bot size={15} />
+                    新增机器人
+                  </div>
+                  <Badge tone="neutral">{suggestedRobotCode}</Badge>
+                </div>
+                <div className="grid gap-2">
+                  <input
+                    className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                    value={newRobotCode}
+                    onChange={(event) => setNewRobotCode(event.currentTarget.value)}
+                    placeholder="robot-004"
+                  />
+                  <input
+                    className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                    value={newRobotType}
+                    onChange={(event) => setNewRobotType(event.currentTarget.value)}
+                    placeholder="machine-dog"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <NumberInput label="初始 X" value={newRobotX} onChange={setNewRobotX} />
+                    <NumberInput label="初始 Y" value={newRobotY} onChange={setNewRobotY} />
+                  </div>
+                  <Button variant="secondary" onClick={() => void handleCreateRobot()}>
+                    <Plus size={15} />
+                    添加机器人
+                  </Button>
+                </div>
+              </div>
               {selectedScenario && (
                 <div className="mt-4 grid gap-2 text-xs text-neutral-500">
                   <InfoRow label="地图" value={`${selectedScenario.siteMapId} / ${selectedScenario.siteMapVersion}`} />
+                  <InfoRow label="机器人数量" value={String(selectedScenario.robotCodes.length)} />
                   <InfoRow label="机器人" value={selectedScenario.robotCodes.join(", ") || "-"} />
                   <InfoRow label="动作集" value={(selectedScenario.actionSet.commands ?? []).join(", ")} />
                   <InfoRow
@@ -849,7 +940,7 @@ export function SimulationDashboard() {
                   value={effectiveRobotCode}
                   onChange={(event) => setSelectedRobotCode(event.currentTarget.value)}
                 >
-                  {(selectedScenario?.robotCodes.length ? selectedScenario.robotCodes : robots.map((robot) => robot.robotId)).map((robotCode) => (
+                  {availableRobotCodes.map((robotCode) => (
                     <option key={robotCode} value={robotCode}>
                       {robotCode}
                     </option>
@@ -905,7 +996,7 @@ export function SimulationDashboard() {
                   <span>Action 队列</span>
                   <span>{taskActions.length} / {actions.length}</span>
                 </div>
-                {(taskActions.length ? taskActions : actions).slice(0, 6).map((action) => (
+                {visibleActionQueue.slice(0, 6).map((action) => (
                   <button
                     key={action.actionId}
                     className={`w-full rounded-lg border px-3 py-2 text-left transition ${
@@ -916,10 +1007,10 @@ export function SimulationDashboard() {
                     onClick={() => void handleSelectAction(action.actionId)}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-neutral-800">{action.command}</span>
+                      <span className="truncate text-sm font-medium text-neutral-800">{action.robotCode} / {action.command}</span>
                       <Badge tone={statusTone(action.status)}>{action.status}</Badge>
                     </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">{action.commandId ?? action.actionId}</div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">{action.commandId ?? action.actionId} / {action.actionId}</div>
                   </button>
                 ))}
                 {actions.length === 0 && <EmptyState text="暂无 Action" />}
@@ -929,23 +1020,46 @@ export function SimulationDashboard() {
             <Panel className="p-4">
               <PanelTitle icon={Gauge} title="看状态" subtitle="机器人 / 任务 / 资源" />
               <div className="mt-4 space-y-3">
-                {robots.map((robot) => (
-                  <div key={robot.robotId} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm font-medium">
-                        <Bot size={15} />
-                        {robot.robotId}
+                {robots.map((robot) => {
+                  const isSelected = robot.robotId === effectiveRobotCode;
+                  return (
+                    <button
+                      key={robot.robotId}
+                      className={`w-full rounded-lg border p-3 text-left transition ${
+                        isSelected
+                          ? "border-neutral-950 bg-white shadow-sm"
+                          : "border-neutral-200 bg-neutral-50 hover:border-neutral-300"
+                      }`}
+                      onClick={() => {
+                        setSelectedRobotCode(robot.robotId);
+                        if (selectedExceptionOption.targetType === "robot") {
+                          setExceptionTarget(robot.robotId);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                          <Bot size={15} />
+                          <span className="truncate">{robot.robotId}</span>
+                        </div>
+                        <Badge tone={statusTone(robot.state)}>{robot.state}</Badge>
                       </div>
-                      <Badge tone={statusTone(robot.state)}>{robot.state}</Badge>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-500">
-                      <span>X {Math.round(robot.x)}</span>
-                      <span>Y {Math.round(robot.y)}</span>
-                      <span>进度 {robot.progress}%</span>
-                      <span>{robot.currentAction}</span>
-                    </div>
-                  </div>
-                ))}
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-500">
+                        <span>X {Math.round(robot.x)}</span>
+                        <span>Y {Math.round(robot.y)}</span>
+                        <span>进度 {robot.progress}%</span>
+                        <span className="truncate">{robot.currentAction}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+                {selectedRobot && (
+                  <CompactRow
+                    label="选中机器人"
+                    value={`${selectedRobot.robotId} / ${selectedRobot.state}`}
+                    tone={statusTone(selectedRobot.state)}
+                  />
+                )}
                 <CompactRow
                   label="当前任务"
                   value={String(currentState?.taskState.status ?? "NoTask")}
@@ -973,12 +1087,29 @@ export function SimulationDashboard() {
                     </option>
                   ))}
                 </select>
-                <input
-                  className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
-                  value={exceptionTarget}
-                  onChange={(event) => setExceptionTarget(event.currentTarget.value)}
-                  placeholder="robot-001 / edge-2 / api"
-                />
+                {selectedExceptionOption.targetType === "robot" ? (
+                  <select
+                    className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                    value={exceptionTarget || effectiveRobotCode}
+                    onChange={(event) => {
+                      setExceptionTarget(event.currentTarget.value);
+                      setSelectedRobotCode(event.currentTarget.value);
+                    }}
+                  >
+                    {availableRobotCodes.map((robotCode) => (
+                      <option key={robotCode} value={robotCode}>
+                        {robotCode}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                    value={exceptionTarget}
+                    onChange={(event) => setExceptionTarget(event.currentTarget.value)}
+                    placeholder="edge-2 / api / message-id"
+                  />
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <NumberInput label="持续 ms" value={exceptionDurationMs} onChange={(value) => setExceptionDurationMs(Math.max(0, value))} />
                   <label className="flex items-end gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-500">
@@ -1459,29 +1590,33 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function robotsFromState(state: CurrentState | null, scenario?: ScenarioSummary): RobotState[] {
-  const robots = state?.robotStates ?? [];
-  if (robots.length > 0) {
-    return robots.map((robot) => ({
-      robotId: String(robot.robotId ?? robot.robotCode ?? "robot-001"),
-      robotType: String(robot.robotType ?? "machine-dog"),
-      state: String(robot.state ?? "Idle"),
-      x: Number(robot.x ?? 0),
-      y: Number(robot.y ?? 0),
-      progress: Number(robot.progress ?? 0),
-      currentAction: String(robot.currentAction ?? "Waiting"),
-      updatedAt: String(robot.updatedAt ?? new Date().toISOString())
-    }));
-  }
-  return (scenario?.robotCodes ?? ["robot-001"]).map((robotId) => ({
-    robotId,
-    robotType: "machine-dog",
-    state: "Idle",
-    x: 220,
-    y: 360,
-    progress: 0,
-    currentAction: "Waiting",
-    updatedAt: new Date().toISOString()
+  const robots = (state?.robotStates ?? []).map((robot) => ({
+    robotId: String(robot.robotId ?? robot.robotCode ?? "robot-001"),
+    robotType: String(robot.robotType ?? "machine-dog"),
+    state: String(robot.state ?? "Idle"),
+    x: Number(robot.x ?? 0),
+    y: Number(robot.y ?? 0),
+    progress: Number(robot.progress ?? 0),
+    currentAction: String(robot.currentAction ?? "Waiting"),
+    updatedAt: String(robot.updatedAt ?? new Date().toISOString())
   }));
+  const existingRobotIds = new Set(robots.map((robot) => robot.robotId));
+  const fallbackRobots = (scenario?.robotCodes ?? (robots.length ? [] : ["robot-001"]))
+    .filter((robotId) => !existingRobotIds.has(robotId))
+    .map((robotId, index) => {
+      const profile = scenario?.robots?.find((item) => item.robotCode === robotId);
+      return {
+        robotId,
+        robotType: profile?.robotType ?? "machine-dog",
+        state: profile?.state ?? "Idle",
+        x: Number(profile?.initialPose?.x ?? 220 + index * 100),
+        y: Number(profile?.initialPose?.y ?? 360),
+        progress: 0,
+        currentAction: "Waiting",
+        updatedAt: new Date().toISOString()
+      };
+    });
+  return [...robots, ...fallbackRobots];
 }
 
 function stationTarget(map: SiteMap | undefined, stationId: string) {
@@ -1490,6 +1625,14 @@ function stationTarget(map: SiteMap | undefined, stationId: string) {
     x: station?.x ?? 760,
     y: station?.y ?? 420
   };
+}
+
+function nextRobotCode(robotCodes: string[]) {
+  const maxIndex = robotCodes.reduce((currentMax, robotCode) => {
+    const match = /^robot-(\d+)$/.exec(robotCode);
+    return match ? Math.max(currentMax, Number(match[1])) : currentMax;
+  }, 0);
+  return `robot-${String(maxIndex + 1).padStart(3, "0")}`;
 }
 
 function commandTargetParams(x: number, y: number, z: number, yaw: number) {

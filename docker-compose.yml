@@ -72,10 +72,49 @@ services:
       MQTT_PORT: 1883
       SIM_ENV: dev
       SITE_ID: site-a
+      MQTT_CLIENT_ID: virtual-dog-robot-001
       ROBOT_CODE: robot-001
       ROBOT_ID: robot-001
       ROBOT_TYPE: machine-dog
       START_X: 220
+      START_Y: 360
+      TIME_SCALE: 1.0
+      RANDOM_EVENT_RATE: 0.05
+    depends_on:
+      - mqtt-broker
+
+  virtual-robot-runner-2:
+    build:
+      context: ./robot-executor
+    environment:
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      SIM_ENV: dev
+      SITE_ID: site-a
+      MQTT_CLIENT_ID: virtual-dog-robot-002
+      ROBOT_CODE: robot-002
+      ROBOT_ID: robot-002
+      ROBOT_TYPE: machine-dog
+      START_X: 320
+      START_Y: 360
+      TIME_SCALE: 1.0
+      RANDOM_EVENT_RATE: 0.05
+    depends_on:
+      - mqtt-broker
+
+  virtual-robot-runner-3:
+    build:
+      context: ./robot-executor
+    environment:
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      SIM_ENV: dev
+      SITE_ID: site-a
+      MQTT_CLIENT_ID: virtual-dog-robot-003
+      ROBOT_CODE: robot-003
+      ROBOT_ID: robot-003
+      ROBOT_TYPE: machine-dog
+      START_X: 420
       START_Y: 360
       TIME_SCALE: 1.0
       RANDOM_EVENT_RATE: 0.05

@@ -43,6 +43,15 @@ export interface RobotState {
   updatedAt: string;
 }
 
+export interface RobotCreate {
+  robotCode: string;
+  robotType: string;
+  x: number;
+  y: number;
+  state?: string;
+  currentAction?: string;
+}
+
 export interface MessageRecord {
   messageId: string;
   messageType: string;
@@ -139,6 +148,13 @@ export interface ScenarioSummary {
   siteMapId: string;
   siteMapVersion: string;
   robotCodes: string[];
+  robots?: Array<{
+    robotCode: string;
+    robotType: string;
+    initialPose?: { x: number; y: number };
+    state?: string;
+    capabilities?: string[];
+  }>;
   robotTypeIds: string[];
   actionSet: Record<string, unknown> & { commands?: string[] };
   taskFlow: Record<string, unknown>;

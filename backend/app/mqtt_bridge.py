@@ -180,6 +180,8 @@ class PlatformMqttBridge:
             "action.succeeded",
             "action.failed",
             "device.offline",
+            "fault.recovered",
+            "path.blocked",
         }:
             return
 
@@ -200,6 +202,8 @@ class PlatformMqttBridge:
             "action.succeeded": "Idle",
             "action.failed": "Error",
             "device.offline": "Offline",
+            "fault.recovered": "Idle",
+            "path.blocked": "Error",
         }
         progress_by_event = {
             "task.started": 0,
@@ -211,6 +215,8 @@ class PlatformMqttBridge:
             "action.progress": int(data.get("progress", previous_progress)),
             "action.succeeded": 100,
             "action.failed": 0,
+            "path.blocked": previous_progress,
+            "fault.recovered": 0,
         }
         x = float(data.get("x", previous.x if previous else 0))
         y = float(data.get("y", previous.y if previous else 0))

@@ -11,6 +11,7 @@ import type {
   MessageRecord,
   MqttContract,
   Observation,
+  RobotCreate,
   RobotState,
   ScenarioSummary,
   ScenarioValidationResponse,
@@ -79,6 +80,13 @@ export function publishDraft(mapId: string, draftId: string) {
 
 export function getRobots() {
   return request<RobotState[]>("/api/v1/robots");
+}
+
+export function createRobot(robot: RobotCreate) {
+  return request<RobotState>("/api/v1/robots", {
+    method: "POST",
+    body: JSON.stringify(robot)
+  });
 }
 
 export function getMessages() {
