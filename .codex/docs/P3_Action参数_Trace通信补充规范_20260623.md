@@ -38,11 +38,11 @@ wait
 | `goto_pose` | `x`, `y` | `z=0`, `yaw=0`, `speed=1.0`, `tolerance=50` | 移动到二维/姿态点位 |
 | `where` | 无 | `queryMode=pose` | 查询模式：`pose/state/full` |
 | `stop` | 无 | `stopScope=current_action`, `reason=manual_stop` | 停止范围：`current_action/task/robot` |
-| `pick` | `targetId` | `durationMinMs=3000`, `durationMaxMs=5000` | 抓取目标 |
-| `place` | `targetId` | `durationMinMs=3000`, `durationMaxMs=5000` | 放置目标 |
+| `pick` | `targetId` | `targetType=object`, `durationMinMs=3000`, `durationMaxMs=5000` | 抓取目标 |
+| `place` | `targetId` | `targetType=station`, `durationMinMs=3000`, `durationMaxMs=5000` | 放置目标 |
 | `load` | `stationId` | `durationMinMs=5000`, `durationMaxMs=8000` | 装载 |
 | `unload` | `stationId` | `durationMinMs=5000`, `durationMaxMs=8000` | 卸载 |
-| `inspect` | `targetId` | `durationMinMs=4000`, `durationMaxMs=7000` | 巡检/检测 |
+| `inspect` | `targetId` | `targetType=inspectionPoint`, `durationMinMs=4000`, `durationMaxMs=7000` | 巡检/检测 |
 | `charge` | 无 | `targetBattery=95`, `durationMinMs=10000`, `durationMaxMs=15000` | 充电 |
 | `wait` | 无 | `durationMinMs=1000`, `durationMaxMs=3000` | 等待 |
 
@@ -54,6 +54,48 @@ wait
 - `durationMinMs >= 0` 且 `durationMaxMs >= durationMinMs`。
 - `speed > 0`。
 - `tolerance >= 0`。
+
+### 2.4 targetType 与 targetId 标准定义
+
+`targetId` 表示当前 Action 作用的业务实体 ID，不表示坐标。
+
+`targetType` 表示该业务实体的类型，当前标准枚举为：
+
+```text
+object
+cargo
+container
+station
+resource
+mapObject
+inspectionPoint
+```
+
+标准语义：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `targetType` | enum | 当前动作作用对象的类型 |
+| `targetId` | string | 当前动作作用对象的业务 ID |
+
+示例：
+
+```json
+{
+  "command": "pick",
+  "params": {
+    "targetType": "cargo",
+    "targetId": "box-001",
+    "durationMinMs": 3000,
+    "durationMaxMs": 5000
+  }
+}
+```
+
+约束：
+- `goto_pose` 使用坐标 `x/y/z/yaw/speed/tolerance`，不使用 `targetId` 表示目标。
+- `load/unload` 当前继续使用 `stationId` 表示装卸工位。
+- 当前阶段只校验 `targetType` 枚举和值必填，不校验 `targetId` 是否真实存在于地图、货物或资源表。
 
 ## 3. REST 接口补充
 
@@ -227,4 +269,3 @@ where.result
 python -m pytest backend\tests
 npm --prefix frontend run build
 ```
-

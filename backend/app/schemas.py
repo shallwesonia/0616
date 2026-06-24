@@ -20,6 +20,7 @@ ActionCommand = Literal[
     "charge",
     "wait",
 ]
+ACTION_TARGET_TYPE_OPTIONS = ["object", "cargo", "container", "station", "resource", "mapObject", "inspectionPoint"]
 
 ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "goto_pose": {
@@ -65,9 +66,21 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "pick": {
         "label": "Pick",
         "required": ["targetId"],
-        "defaults": {"durationMinMs": 3000, "durationMaxMs": 5000},
+        "defaults": {"targetType": "object", "durationMinMs": 3000, "durationMaxMs": 5000},
         "fields": {
-            "targetId": {"type": "string", "required": True, "label": "目标对象"},
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ACTION_TARGET_TYPE_OPTIONS,
+                "description": "当前动作作用的业务实体类型。",
+            },
+            "targetId": {
+                "type": "string",
+                "required": True,
+                "label": "目标对象ID",
+                "description": "当前动作作用的业务实体 ID，例如 box-001、parcel-001、tote-01。",
+            },
             "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
             "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
         },
@@ -75,9 +88,21 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "place": {
         "label": "Place",
         "required": ["targetId"],
-        "defaults": {"durationMinMs": 3000, "durationMaxMs": 5000},
+        "defaults": {"targetType": "station", "durationMinMs": 3000, "durationMaxMs": 5000},
         "fields": {
-            "targetId": {"type": "string", "required": True, "label": "目标位置"},
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ACTION_TARGET_TYPE_OPTIONS,
+                "description": "当前动作作用的业务实体类型。",
+            },
+            "targetId": {
+                "type": "string",
+                "required": True,
+                "label": "目标位置ID",
+                "description": "当前动作作用的目标位置、容器、工位或地图对象 ID。",
+            },
             "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
             "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
         },
@@ -105,9 +130,21 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "inspect": {
         "label": "Inspect",
         "required": ["targetId"],
-        "defaults": {"durationMinMs": 4000, "durationMaxMs": 7000},
+        "defaults": {"targetType": "inspectionPoint", "durationMinMs": 4000, "durationMaxMs": 7000},
         "fields": {
-            "targetId": {"type": "string", "required": True, "label": "巡检对象"},
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ACTION_TARGET_TYPE_OPTIONS,
+                "description": "当前动作作用的业务实体类型。",
+            },
+            "targetId": {
+                "type": "string",
+                "required": True,
+                "label": "巡检对象ID",
+                "description": "当前动作巡检的点位、设备、资源或地图对象 ID。",
+            },
             "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
             "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
         },

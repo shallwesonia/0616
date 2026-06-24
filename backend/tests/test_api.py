@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import backend.app.main as main_module
 from backend.app.database_store import DatabaseStore
 from backend.app.main import app
-from backend.app.schemas import action_command_names
+from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, action_command_names
 
 
 def test_health_has_component_statuses():
@@ -139,6 +139,19 @@ def test_command_stop_creates_new_robot_control_action(tmp_path, monkeypatch):
         assert invalid_action_response.status_code == 400
         assert "params.y" in invalid_action_response.json()["detail"]
 
+        invalid_target_type_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "taskId": task_id,
+                "robotCode": "robot-001",
+                "command": "pick",
+                "params": {"targetType": "unknown", "targetId": "box-001"},
+            },
+        )
+        assert invalid_target_type_response.status_code == 400
+        assert "targetType" in invalid_target_type_response.json()["detail"]
+
         original_action_response = client.post(
             "/api/v1/actions",
             json={
@@ -210,6 +223,11 @@ def test_action_command_specs_expose_standard_params():
         assert {"x", "y", "z", "yaw", "speed", "tolerance"}.issubset(commands["goto_pose"]["fields"])
         assert commands["where"]["fields"]["queryMode"]["options"] == ["pose", "state", "full"]
         assert commands["stop"]["fields"]["stopScope"]["options"] == ["current_action", "task", "robot"]
+        assert commands["pick"]["defaults"]["targetType"] == "object"
+        assert commands["place"]["defaults"]["targetType"] == "station"
+        assert commands["inspect"]["defaults"]["targetType"] == "inspectionPoint"
+        assert commands["pick"]["fields"]["targetType"]["options"] == ACTION_TARGET_TYPE_OPTIONS
+        assert commands["pick"]["fields"]["targetId"]["label"] == "目标对象ID"
 
 
 def test_mqtt_contract_uses_dog_command_result_topics():
