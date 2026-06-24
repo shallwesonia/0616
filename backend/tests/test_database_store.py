@@ -230,6 +230,38 @@ def test_database_store_p3_simulation_run_chain(tmp_path):
     assert exported["observations"]
 
 
+def test_stop_action_is_platform_lifecycle_only(tmp_path):
+    store = create_store(tmp_path)
+    scenario = store.list_scenarios()[0]
+    run = store.create_simulation_run(SimulationRunCreate(scenarioId=scenario.scenarioId, name="stop semantics"))
+    task = store.create_simulation_task(
+        run.runId,
+        SimulationTaskCreate(goal="Move before platform stop", input={"command": "goto_pose", "target": {"x": 760, "y": 420}}),
+    )
+    assert task is not None
+    action = store.create_action(
+        ActionCreate(
+            runId=run.runId,
+            taskId=task.taskId,
+            command="goto_pose",
+            params={"x": 760, "y": 420, "z": 0, "yaw": 0},
+        )
+    )
+    assert action is not None
+    issued = store.mark_action_issued(action.actionId, "CMD-STOP-SEM-001", None, {"mqttPublished": False})
+    assert issued is not None
+    before_command_messages = [message.messageId for message in store.query_messages(message_type="command", limit=100)]
+
+    stopped = store.stop_action(action.actionId)
+
+    assert stopped is not None
+    assert stopped.status == "Stopped"
+    after_command_messages = [message.messageId for message in store.query_messages(message_type="command", limit=100)]
+    assert after_command_messages == before_command_messages
+    trace = store.get_trace(action.traceId)
+    assert any(span.operation == "action.stopped" for span in trace.spans)
+
+
 def test_database_store_simulation_cockpit_enhancements(tmp_path):
     store = create_store(tmp_path)
     scenario = store.list_scenarios()[0]
@@ -295,7 +327,18 @@ def test_database_store_simulation_cockpit_enhancements(tmp_path):
     )
     assert replay is not None
     assert replay.message.payload["event"] == "message.replayed"
+    assert replay.message.source == "simulation-replay"
+    assert replay.message in store.list_run_messages(run.runId, limit=20)
     assert replay.message.payload["data"]["sandbox"] is True
+
+    offline = store.inject_simulation_event(
+        run.runId,
+        SimulationEventCreate(eventType="robot.offline", targetType="robot", targetId="robot-001", severity="critical"),
+    )
+    assert offline is not None
+    assert offline.event == "robot.offline"
+    assert offline.source == "simulation-console"
+    assert offline.category == "Alert"
 
     alert = store.inject_simulation_event(
         run.runId,

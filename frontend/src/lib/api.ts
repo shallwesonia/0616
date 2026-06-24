@@ -5,6 +5,7 @@ import type {
   CurrentState,
   DraftResponse,
   BatchTaskResponse,
+  ActionCommandSpec,
   HealthResponse,
   MessageReplayResponse,
   MessageRecord,
@@ -19,6 +20,8 @@ import type {
   Snapshot,
   SiteMap,
   TaskTemplate,
+  RunMessageMetrics,
+  TraceGraph,
   TraceResponse
 } from "./types";
 
@@ -154,6 +157,10 @@ export function getTaskTemplates() {
   return request<TaskTemplate[]>("/api/v1/task-templates");
 }
 
+export function getActionCommandSpecs() {
+  return request<ActionCommandSpec[]>("/api/v1/action-command-specs");
+}
+
 export function createSimulationRun(scenarioId: string, name?: string) {
   return request<SimulationRun>("/api/v1/simulation-runs", {
     method: "POST",
@@ -241,7 +248,7 @@ export function createSimulationAction(payload: {
   planId?: string | null;
   planStepId?: string | null;
   robotCode?: string | null;
-  command: "goto_pose" | "where" | "stop";
+  command: string;
   params?: Record<string, unknown>;
   timeoutMs?: number;
   operatorId?: string;
@@ -263,6 +270,10 @@ export function getCurrentState(runId: string) {
 export function getRunMessages(runId: string, category?: string) {
   const query = category ? `?category=${encodeURIComponent(category)}` : "";
   return request<MessageRecord[]>(`/api/v1/simulation-runs/${runId}/messages${query}`);
+}
+
+export function getRunMessageMetrics(runId: string) {
+  return request<RunMessageMetrics>(`/api/v1/simulation-runs/${runId}/message-metrics`);
 }
 
 export function replayRunMessage(
@@ -332,6 +343,18 @@ export function createSimulationSnapshot(runId: string, reason: string) {
 
 export function getTrace(traceId: string) {
   return request<TraceResponse>(`/api/v1/traces/${traceId}`);
+}
+
+export function getTaskTrace(taskId: string) {
+  return request<TraceResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/trace`);
+}
+
+export function getActionTrace(actionId: string) {
+  return request<TraceResponse>(`/api/v1/actions/${encodeURIComponent(actionId)}/trace`);
+}
+
+export function getTraceGraph(traceId: string) {
+  return request<TraceGraph>(`/api/v1/traces/${encodeURIComponent(traceId)}/graph`);
 }
 
 export function exportSimulationRun(runId: string) {

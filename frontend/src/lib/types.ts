@@ -260,6 +260,25 @@ export interface SimulationAction {
   finishedAt?: string | null;
 }
 
+export interface ActionCommandSpecParam {
+  label: string;
+  type: "number" | "string" | "select";
+  required?: boolean;
+  min?: number | null;
+  max?: number | null;
+  options?: string[] | null;
+  unit?: string | null;
+  description?: string | null;
+}
+
+export interface ActionCommandSpec {
+  command: string;
+  label: string;
+  required: string[];
+  defaults: Record<string, string | number | null>;
+  fields: Record<string, ActionCommandSpecParam>;
+}
+
 export interface Observation {
   observationId: string;
   runId: string;
@@ -343,6 +362,43 @@ export interface TraceResponse {
   finishedAt?: string | null;
   durationMs?: number | null;
   spans: TraceSpan[];
+}
+
+export interface TraceGraphNode {
+  id: string;
+  label: string;
+  type: string;
+  entityId: string;
+  status: string;
+  startedAt?: string | null;
+}
+
+export interface TraceGraphEdge {
+  from: string;
+  to: string;
+  type: string;
+}
+
+export interface TraceGraph {
+  traceId: string;
+  status: string;
+  nodes: TraceGraphNode[];
+  edges: TraceGraphEdge[];
+}
+
+export interface RunMessageMetrics {
+  runId: string;
+  messageCount: number;
+  categoryCounts: Record<string, number>;
+  eventCounts: Record<string, number>;
+  duplicateCount: number;
+  timeoutCount: number;
+  errorCount: number;
+  ackDelayMs: {
+    count: number;
+    avg?: number | null;
+    max?: number | null;
+  };
 }
 
 export interface SimulationSnapshot {

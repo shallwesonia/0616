@@ -61,9 +61,11 @@ from .schemas import (
     TraceResponse,
     TraceSpan,
     SiteMap,
+    action_command_names,
     new_id,
     protocol_id,
     utc_now,
+    validate_action_params,
 )
 from .store import DATA_DIR, DEFAULT_MAP, EXPORT_DIR, STATE_PATH, JsonStore, default_state
 
@@ -89,16 +91,16 @@ class DatabaseStore(JsonStore):
             name="Sorting transfer",
             description="Move the robot from the current position to a sorting station.",
             defaultGoal="Move material to the sorting station",
-            defaultInput={"command": "goto_pose", "target": {"x": 760, "y": 420, "z": 0, "yaw": 0}},
-            supportedCommands=["goto_pose", "where", "stop"],
+            defaultInput={"command": "goto_pose", "target": {"x": 760, "y": 420, "z": 0, "yaw": 0, "speed": 1.0, "tolerance": 50}},
+            supportedCommands=action_command_names(),
         ),
         TaskTemplate(
             templateId="pick-and-place",
             name="Pick and place",
             description="Simulate pick, carry and place as a single goto_pose execution step.",
             defaultGoal="Pick material and place it at the target station",
-            defaultInput={"command": "goto_pose", "target": {"x": 220, "y": 240, "z": 0, "yaw": 0}},
-            supportedCommands=["goto_pose", "where", "stop"],
+            defaultInput={"command": "goto_pose", "target": {"x": 220, "y": 240, "z": 0, "yaw": 0, "speed": 1.0, "tolerance": 50}},
+            supportedCommands=["goto_pose", "pick", "place", "where", "stop"],
         ),
         TaskTemplate(
             templateId="inspect-point",
@@ -106,7 +108,7 @@ class DatabaseStore(JsonStore):
             description="Move to a configured point and report current pose.",
             defaultGoal="Inspect the configured point and report pose",
             defaultInput={"command": "where", "target": {}},
-            supportedCommands=["where", "goto_pose"],
+            supportedCommands=["where", "inspect", "goto_pose"],
         ),
     ]
     ACTION_TERMINAL_STATUSES = {"Succeeded", "Failed", "Rejected", "Stopped", "Timeout"}
@@ -870,6 +872,7 @@ class DatabaseStore(JsonStore):
         now = now_utc()
         action_id = protocol_id("ACTION")
         robot_code = request.robotCode or self._default_robot_code()
+        params = validate_action_params(request.command, request.params)
         with self.database.session() as session:
             run = self._run_row(session, request.runId)
             if run is None:
@@ -908,7 +911,7 @@ class DatabaseStore(JsonStore):
                 trace_id=trace_id,
                 robot_code=robot_code,
                 command=request.command,
-                params_json=request.params,
+                params_json=params,
                 attempt_no=1,
                 timeout_ms=request.timeoutMs,
                 status="Pending",
@@ -1349,6 +1352,43 @@ class DatabaseStore(JsonStore):
                 spans=[self._trace_span_model(row) for row in spans],
             )
 
+    def get_task_trace(self, task_id: str) -> TraceResponse:
+        task = self.get_task(task_id)
+        if task is None:
+            return TraceResponse(traceId=task_id, status="NotFound")
+        return self.get_trace(task.traceId)
+
+    def get_action_trace(self, action_id: str) -> TraceResponse:
+        action = self.get_action(action_id)
+        if action is None:
+            return TraceResponse(traceId=action_id, status="NotFound")
+        return self.get_trace(action.traceId)
+
+    def get_trace_graph(self, trace_id: str) -> dict[str, Any]:
+        trace = self.get_trace(trace_id)
+        if trace.status == "NotFound":
+            return {"traceId": trace_id, "status": "NotFound", "nodes": [], "edges": []}
+        nodes = [
+            {
+                "id": span.spanId,
+                "label": span.operation,
+                "type": span.entityType,
+                "entityId": span.entityId,
+                "status": span.status,
+                "startedAt": span.startedAt,
+            }
+            for span in trace.spans
+        ]
+        edges = []
+        previous_id: str | None = None
+        for span in trace.spans:
+            if span.parentSpanId:
+                edges.append({"from": span.parentSpanId, "to": span.spanId, "type": "parent"})
+            elif previous_id:
+                edges.append({"from": previous_id, "to": span.spanId, "type": "sequence"})
+            previous_id = span.spanId
+        return {"traceId": trace_id, "status": trace.status, "nodes": nodes, "edges": edges}
+
     def list_run_messages(self, run_id: str, limit: int = 100, category: str | None = None) -> list[MessageRecord]:
         with self.database.session() as session:
             tasks = session.scalars(
@@ -1386,6 +1426,48 @@ class DatabaseStore(JsonStore):
             if category:
                 return [message for message in messages if self._message_category(message) == category]
             return messages
+
+    def run_message_metrics(self, run_id: str) -> dict[str, Any]:
+        messages = list(reversed(self.list_run_messages(run_id, limit=1000)))
+        category_counts: dict[str, int] = {}
+        event_counts: dict[str, int] = {}
+        seen_ids: set[str] = set()
+        duplicate_count = 0
+        command_times: dict[str, datetime] = {}
+        ack_delays: list[int] = []
+        timeout_count = 0
+        error_count = 0
+        for message in messages:
+            category = self._message_category(message)
+            category_counts[category] = category_counts.get(category, 0) + 1
+            event = str(message.payload.get("event") or message.payload.get("command") or message.messageType)
+            event_counts[event] = event_counts.get(event, 0) + 1
+            if message.messageId in seen_ids:
+                duplicate_count += 1
+            seen_ids.add(message.messageId)
+            command_id = message.payload.get("commandId")
+            if message.messageType == "command" and command_id:
+                command_times[str(command_id)] = parse_datetime(message.createdAt)
+            if event in {"command.accepted", "command.rejected"} and command_id and str(command_id) in command_times:
+                ack_delays.append(int((parse_datetime(message.createdAt) - command_times[str(command_id)]).total_seconds() * 1000))
+            if "timeout" in event:
+                timeout_count += 1
+            if category == "Alert" or message.payload.get("error"):
+                error_count += 1
+        return {
+            "runId": run_id,
+            "messageCount": len(messages),
+            "categoryCounts": category_counts,
+            "eventCounts": event_counts,
+            "duplicateCount": duplicate_count,
+            "timeoutCount": timeout_count,
+            "errorCount": error_count,
+            "ackDelayMs": {
+                "count": len(ack_delays),
+                "avg": round(sum(ack_delays) / len(ack_delays), 2) if ack_delays else None,
+                "max": max(ack_delays) if ack_delays else None,
+            },
+        }
 
     def export_simulation_run(self, run_id: str) -> dict[str, Any] | None:
         run = self.get_simulation_run(run_id)
@@ -1451,7 +1533,7 @@ class DatabaseStore(JsonStore):
             siteMapVersion=current_map.configVersion,
             robotCodes=robot_codes,
             robotTypeIds=sorted({robot.robotType for robot in robots}) or ["machine-dog"],
-            actionSet={"actionSetId": "machine-dog-basic", "commands": ["goto_pose", "where", "stop"]},
+            actionSet={"actionSetId": "machine-dog-basic", "commands": action_command_names()},
             taskFlow={"taskFlowId": "basic-task-flow", "modes": ["manual", "template"]},
             resourceProfile={"resourceProfileId": "default", "resourceLocks": [], "pathCapacity": "map.pathEdges.capacity"},
             map=current_map,
@@ -1682,7 +1764,7 @@ class DatabaseStore(JsonStore):
     def _event_category(event: str) -> str:
         if event in {"command.accepted", "command.rejected"}:
             return "Ack"
-        if event in {"pose.updated", "where.result"}:
+        if event in {"pose.updated", "where.result", "action.progress"}:
             return "Telemetry"
         if event.startswith("interface."):
             return "Interface"
@@ -1741,10 +1823,10 @@ class DatabaseStore(JsonStore):
     ) -> None:
         if event == "command.accepted":
             action.status = "Accepted"
-        elif event == "task.started":
+        elif event in {"task.started", "action.started", "action.progress"}:
             action.status = "Running"
             action.started_at = action.started_at or timestamp
-        elif event in {"task.succeeded", "where.result"}:
+        elif event in {"task.succeeded", "where.result", "action.succeeded"}:
             action.status = "Succeeded"
             action.finished_at = timestamp
         elif event == "command.rejected":
@@ -1763,7 +1845,7 @@ class DatabaseStore(JsonStore):
 
     @staticmethod
     def _apply_task_event(task: SimulationTaskRecord, event: str, timestamp: datetime) -> None:
-        if event == "task.started":
+        if event in {"task.started", "action.started", "action.progress"}:
             task.status = "Running"
             task.started_at = task.started_at or timestamp
         elif event in {"task.succeeded", "where.result"}:
@@ -2074,11 +2156,11 @@ class DatabaseStore(JsonStore):
             source=message.source,
             topic=message.topic,
             command_id=payload.get("commandId") or payload.get("correlationId") or inner_payload.get("commandId"),
-            task_id=payload.get("taskId"),
-            request_id=payload.get("requestId"),
-            trace_id=payload.get("traceId"),
+            task_id=payload.get("taskId") or inner_payload.get("taskId"),
+            request_id=payload.get("requestId") or inner_payload.get("requestId"),
+            trace_id=payload.get("traceId") or inner_payload.get("traceId"),
             robot_code=payload.get("robotCode") or payload.get("robotId") or inner_payload.get("robotCode"),
-            event=payload.get("event"),
+            event=payload.get("event") or inner_payload.get("event") or inner_payload.get("eventType"),
             created_at=parse_datetime(message.createdAt),
             payload_json=payload,
         )

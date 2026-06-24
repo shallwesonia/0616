@@ -14,6 +14,8 @@ from .mqtt_contract import MQTT_CONTRACT
 from .schemas import (
     BatchTaskCreate,
     BatchTaskResponse,
+    ACTION_COMMAND_SPECS,
+    ActionCommandSpec,
     CommandCreate,
     CommandResponse,
     ConsoleEventCreate,
@@ -46,9 +48,11 @@ from .schemas import (
     TaskTemplate,
     TraceResponse,
     ValidationResponse,
+    action_command_names,
     new_id,
     protocol_id,
     utc_now,
+    validate_action_params,
 )
 from .store import EXPORT_DIR
 from .store_factory import create_store
@@ -144,10 +148,14 @@ def get_connections() -> dict:
                 "topicPrefix": topic_prefix,
                 "commandTopic": f"{topic_prefix}/{{robotCode}}/command",
                 "resultTopic": f"{topic_prefix}/{{robotCode}}/result",
-                "supportedCommands": ["goto_pose", "stop", "where"],
+                "supportedCommands": action_command_names(),
                 "resultEvents": [
                     "command.accepted",
                     "command.rejected",
+                    "action.started",
+                    "action.progress",
+                    "action.succeeded",
+                    "action.failed",
                     "task.started",
                     "task.succeeded",
                     "task.failed",
@@ -157,6 +165,8 @@ def get_connections() -> dict:
                     "where.result",
                     "where.failed",
                     "device.offline",
+                    "path.blocked",
+                    "fault.recovered",
                 ],
             },
         },
@@ -277,16 +287,11 @@ def create_message(message: MessageRecord) -> MessageRecord:
 
 
 def _normalize_command_name(command_name: str | None) -> str:
-    command_mapping = {
-        "move": "goto_pose",
-        "carry": "goto_pose",
-        "goto_pose": "goto_pose",
-        "stop": "stop",
-        "where": "where",
-    }
+    command_mapping = {command: command for command in action_command_names()}
+    command_mapping.update({"move": "goto_pose", "carry": "goto_pose"})
     normalized = command_mapping.get(command_name or "")
     if not normalized:
-        raise HTTPException(status_code=400, detail="supported commands are goto_pose, stop and where")
+        raise HTTPException(status_code=400, detail=f"supported commands are {', '.join(action_command_names())}")
     return normalized
 
 
@@ -307,9 +312,10 @@ def _issue_command(command: CommandCreate) -> CommandResponse:
     if not robot_code:
         raise HTTPException(status_code=400, detail="robotCode or robotId is required")
     command_name = _normalize_command_name(command.command or command.commandType)
-    params = _command_params(command)
-    if command_name == "goto_pose" and not {"x", "y"}.issubset(params):
-        raise HTTPException(status_code=400, detail="goto_pose requires params.x and params.y")
+    try:
+        params = validate_action_params(command_name, _command_params(command))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     command_id = protocol_id("CMD")
     task_id = command.taskId
@@ -358,6 +364,14 @@ def create_command(command: CommandCreate) -> CommandResponse:
     return _issue_command(command)
 
 
+@app.get("/api/v1/action-command-specs", response_model=list[ActionCommandSpec])
+def list_action_command_specs() -> list[ActionCommandSpec]:
+    return [
+        ActionCommandSpec(command=command, **spec)
+        for command, spec in ACTION_COMMAND_SPECS.items()
+    ]
+
+
 @app.get("/api/v1/commands/{command_id}/trace")
 def get_command_trace(command_id: str) -> dict:
     trace = store.command_trace(command_id)
@@ -371,7 +385,7 @@ def get_command_trace(command_id: str) -> dict:
 @app.post("/api/v1/events", response_model=ConsoleEventResponse)
 def create_console_event(event: ConsoleEventCreate) -> ConsoleEventResponse:
     event_id = new_id("event")
-    topic = "sim/dev/site-a/broadcast/event"
+    topic = f"sim/{bridge.env}/{bridge.site_id}/broadcast/event"
     payload = {
         "messageId": new_id("msg"),
         "messageType": "event",
@@ -401,6 +415,58 @@ def create_console_event(event: ConsoleEventCreate) -> ConsoleEventResponse:
     )
     published = bridge.publish(topic, payload, qos=1, retain=False)
     return ConsoleEventResponse(eventId=event_id, topic=topic, payload=payload, mqttPublished=published)
+
+
+def _broadcast_runtime_event(
+    run_id: str,
+    event_id: str,
+    event_type: str,
+    target_type: str,
+    target_id: str | None,
+    severity: str,
+    task_id: str | None,
+    trace_id: str | None,
+    data: dict,
+) -> bool:
+    topic = f"sim/{bridge.env}/{bridge.site_id}/broadcast/event"
+    timestamp = utc_now()
+    robot_code = target_id if target_type == "robot" else None
+    payload = {
+        "messageId": new_id("msg"),
+        "messageType": "event",
+        "schemaVersion": "1.0",
+        "timestamp": timestamp,
+        "env": bridge.env,
+        "siteId": bridge.site_id,
+        "runId": run_id,
+        "correlationId": event_id,
+        "source": "simulation-console",
+        "commandId": None,
+        "taskId": task_id,
+        "requestId": None,
+        "robotCode": robot_code,
+        "traceId": trace_id or run_id,
+        "event": event_type,
+        "payload": {
+            "eventType": event_type,
+            "targetType": target_type,
+            "targetId": target_id,
+            "severity": severity,
+            "eventData": data,
+            "recoverable": severity != "critical",
+        },
+    }
+    store.append_message(
+        MessageRecord(
+            messageId=payload["messageId"],
+            messageType="event",
+            source="simulation-console",
+            topic=topic,
+            createdAt=timestamp,
+            payload=payload,
+        )
+    )
+    return bridge.publish(topic, payload, qos=1, retain=False)
 
 
 @app.post("/api/v1/exports", response_model=ExportResponse)
@@ -551,9 +617,20 @@ def list_task_plans(task_id: str) -> list[dict]:
     return [plan.model_dump() for plan in store.list_task_plans(task_id)]
 
 
+@app.get("/api/v1/tasks/{task_id}/trace", response_model=TraceResponse)
+def get_task_trace(task_id: str) -> TraceResponse:
+    trace = store.get_task_trace(task_id)
+    if trace.status == "NotFound":
+        raise HTTPException(status_code=404, detail="task trace not found")
+    return trace
+
+
 @app.post("/api/v1/actions", response_model=SimulationAction)
 def create_action(request: ActionCreate) -> SimulationAction:
-    action = store.create_action(request)
+    try:
+        action = store.create_action(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if action is None:
         raise HTTPException(status_code=404, detail="simulation run or task not found")
     command_response = _issue_command(
@@ -590,6 +667,14 @@ def get_action(action_id: str) -> SimulationAction:
     if action is None:
         raise HTTPException(status_code=404, detail="action not found")
     return action
+
+
+@app.get("/api/v1/actions/{action_id}/trace", response_model=TraceResponse)
+def get_action_trace(action_id: str) -> TraceResponse:
+    trace = store.get_action_trace(action_id)
+    if trace.status == "NotFound":
+        raise HTTPException(status_code=404, detail="action trace not found")
+    return trace
 
 
 @app.post("/api/v1/actions/{action_id}/stop", response_model=SimulationAction)
@@ -632,6 +717,13 @@ def list_simulation_run_messages(
     return store.list_run_messages(run_id, limit=limit, category=category)
 
 
+@app.get("/api/v1/simulation-runs/{run_id}/message-metrics")
+def get_simulation_run_message_metrics(run_id: str) -> dict:
+    if store.get_simulation_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return store.run_message_metrics(run_id)
+
+
 @app.post("/api/v1/simulation-runs/{run_id}/messages/{message_id}/replay", response_model=MessageReplayResponse)
 def replay_simulation_run_message(
     run_id: str,
@@ -656,6 +748,21 @@ def inject_simulation_event(run_id: str, request: SimulationEventCreate) -> Obse
     observation = store.inject_simulation_event(run_id, request)
     if observation is None:
         raise HTTPException(status_code=404, detail="simulation run not found")
+    _broadcast_runtime_event(
+        run_id=run_id,
+        event_id=observation.eventId or observation.observationId,
+        event_type=request.eventType,
+        target_type=request.targetType,
+        target_id=request.targetId,
+        severity=request.severity,
+        task_id=observation.taskId,
+        trace_id=observation.traceId,
+        data={
+            "durationMs": request.durationMs,
+            "autoRecover": request.autoRecover,
+            **request.data,
+        },
+    )
     return observation
 
 
@@ -666,6 +773,22 @@ def recover_simulation_event(run_id: str, request: SimulationEventRecoveryCreate
     observation = store.recover_simulation_event(run_id, request)
     if observation is None:
         raise HTTPException(status_code=404, detail="simulation run not found")
+    _broadcast_runtime_event(
+        run_id=run_id,
+        event_id=observation.eventId or observation.observationId,
+        event_type="fault.recovered",
+        target_type=request.targetType,
+        target_id=request.targetId,
+        severity="info",
+        task_id=observation.taskId,
+        trace_id=observation.traceId,
+        data={
+            "eventType": request.eventType,
+            "recoveryMode": request.recoveryMode,
+            "reason": request.reason,
+            "operatorId": request.operatorId,
+        },
+    )
     return observation
 
 
@@ -694,6 +817,14 @@ def get_trace(trace_id: str) -> TraceResponse:
 def get_trace_spans(trace_id: str) -> list:
     trace = get_trace(trace_id)
     return [span.model_dump() for span in trace.spans]
+
+
+@app.get("/api/v1/traces/{trace_id}/graph")
+def get_trace_graph(trace_id: str) -> dict:
+    graph = store.get_trace_graph(trace_id)
+    if graph.get("status") == "NotFound":
+        raise HTTPException(status_code=404, detail="trace not found")
+    return graph
 
 
 @app.get("/api/v1/simulation-runs/{run_id}/export")

@@ -1,11 +1,15 @@
 import os
 from copy import deepcopy
+from uuid import UUID
 
 os.environ["MQTT_ENABLED"] = "false"
 
 from fastapi.testclient import TestClient
 
+import backend.app.main as main_module
+from backend.app.database_store import DatabaseStore
 from backend.app.main import app
+from backend.app.schemas import action_command_names
 
 
 def test_health_has_component_statuses():
@@ -96,6 +100,89 @@ def test_command_endpoint_records_command_without_mqtt():
         assert trace.json()["messageCount"] >= 1
 
 
+def test_command_stop_creates_new_robot_control_action(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-stop-semantics.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000088"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        run_response = client.post(
+            "/api/v1/simulation-runs",
+            json={"scenarioId": "default-site-a", "name": "stop command semantics"},
+        )
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+
+        task_response = client.post(
+            f"/api/v1/simulation-runs/{run_id}/tasks",
+            json={
+                "goal": "Create an action before stop",
+                "input": {"command": "goto_pose", "target": {"x": 760, "y": 420, "z": 0, "yaw": 0}},
+            },
+        )
+        assert task_response.status_code == 200
+        task_id = task_response.json()["taskId"]
+
+        invalid_action_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "taskId": task_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"x": 760},
+            },
+        )
+        assert invalid_action_response.status_code == 400
+        assert "params.y" in invalid_action_response.json()["detail"]
+
+        original_action_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "taskId": task_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"x": 760, "y": 420, "z": 0, "yaw": 0},
+            },
+        )
+        assert original_action_response.status_code == 200
+        original_action = original_action_response.json()
+
+        stop_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "taskId": task_id,
+                "robotCode": "robot-001",
+                "command": "stop",
+                "params": {},
+            },
+        )
+        assert stop_response.status_code == 200
+        stop_action = stop_response.json()
+        assert stop_action["actionId"] != original_action["actionId"]
+        assert stop_action["command"] == "stop"
+        assert stop_action["commandId"].startswith("CMD-")
+        assert stop_action["status"] == "Issued"
+
+        original_after_stop = client.get(f"/api/v1/actions/{original_action['actionId']}")
+        assert original_after_stop.status_code == 200
+        assert original_after_stop.json()["status"] == "Issued"
+
+        messages = client.get("/api/v1/messages", params={"commandId": stop_action["commandId"], "limit": 20})
+        assert messages.status_code == 200
+        payload = messages.json()
+        assert any(
+            message["topic"] == "factory/dogs/robot-001/command"
+            and message["payload"]["command"] == "stop"
+            for message in payload
+        )
+
+
 def test_connections_contract_has_lan_protocols():
     with TestClient(app) as client:
         response = client.get("/api/v1/connections")
@@ -108,7 +195,21 @@ def test_connections_contract_has_lan_protocols():
         assert payload["services"]["mqtt"]["port"] == 18830
         assert payload["services"]["mqtt"]["commandTopic"] == "factory/dogs/{robotCode}/command"
         assert payload["services"]["mqtt"]["resultTopic"] == "factory/dogs/{robotCode}/result"
-        assert payload["services"]["mqtt"]["supportedCommands"] == ["goto_pose", "stop", "where"]
+        assert payload["services"]["mqtt"]["supportedCommands"] == action_command_names()
+        assert "action.progress" in payload["services"]["mqtt"]["resultEvents"]
+        assert "fault.recovered" in payload["services"]["mqtt"]["resultEvents"]
+
+
+def test_action_command_specs_expose_standard_params():
+    with TestClient(app) as client:
+        response = client.get("/api/v1/action-command-specs")
+        assert response.status_code == 200
+        payload = response.json()
+        commands = {item["command"]: item for item in payload}
+        assert set(commands) == set(action_command_names())
+        assert {"x", "y", "z", "yaw", "speed", "tolerance"}.issubset(commands["goto_pose"]["fields"])
+        assert commands["where"]["fields"]["queryMode"]["options"] == ["pose", "state", "full"]
+        assert commands["stop"]["fields"]["stopScope"]["options"] == ["current_action", "task", "robot"]
 
 
 def test_mqtt_contract_uses_dog_command_result_topics():

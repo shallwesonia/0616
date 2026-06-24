@@ -36,16 +36,21 @@ import {
   createSimulationTasksBatch,
   createSimulationTaskFromTemplate,
   exportSimulationRun,
+  getActionCommandSpecs,
+  getActionTrace,
   getCurrentState,
   getRunMessages,
+  getRunMessageMetrics,
   getRunObservations,
   getScenarios,
   getSimulationActions,
   getSimulationRuns,
   getSimulationSocketUrl,
   getSimulationTasks,
+  getTaskTrace,
   getTaskTemplates,
   getTrace,
+  getTraceGraph,
   injectSimulationEvent,
   pauseSimulationRun,
   recoverSimulationEvent,
@@ -56,11 +61,13 @@ import {
   validateScenario
 } from "./lib/api";
 import type {
+  ActionCommandSpec,
   CurrentState,
   MapObject,
   MessageRecord,
   Observation,
   RobotState,
+  RunMessageMetrics,
   ScenarioSummary,
   ScenarioValidationResponse,
   SimulationAction,
@@ -69,6 +76,7 @@ import type {
   SimulationTask,
   SiteMap,
   TaskTemplate,
+  TraceGraph,
   TraceResponse
 } from "./lib/types";
 
@@ -85,6 +93,7 @@ const exceptionOptions = [
 ] as const;
 
 const messageFilters = ["All", "Command", "Ack", "Telemetry", "Event", "Alert", "Interface", "AgentDecision"] as const;
+const sandboxReplayEnabled = false;
 
 const recoveryModes = [
   { value: "manual", label: "手动恢复" },
@@ -97,6 +106,7 @@ const recoveryModes = [
 export function SimulationDashboard() {
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const [actionSpecs, setActionSpecs] = useState<ActionCommandSpec[]>([]);
   const [runs, setRuns] = useState<SimulationRun[]>([]);
   const [run, setRun] = useState<SimulationRun | null>(null);
   const [tasks, setTasks] = useState<SimulationTask[]>([]);
@@ -105,15 +115,21 @@ export function SimulationDashboard() {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [trace, setTrace] = useState<TraceResponse | null>(null);
+  const [traceGraph, setTraceGraph] = useState<TraceGraph | null>(null);
+  const [messageMetrics, setMessageMetrics] = useState<RunMessageMetrics | null>(null);
   const [scenarioValidation, setScenarioValidation] = useState<ScenarioValidationResponse | null>(null);
   const [socketState, setSocketState] = useState<"idle" | "open" | "fallback">("idle");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [selectedActionId, setSelectedActionId] = useState("");
+  const [selectedPlanStepId, setSelectedPlanStepId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("default-site-a");
   const [templateId, setTemplateId] = useState("");
   const [taskMode, setTaskMode] = useState<"manual" | "template" | "batch">("manual");
   const [taskGoal, setTaskGoal] = useState("搬运到分拣工位");
   const [batchCount, setBatchCount] = useState(5);
   const [commandMode, setCommandMode] = useState<"quick" | "advanced">("quick");
-  const [command, setCommand] = useState<"goto_pose" | "where" | "stop">("goto_pose");
+  const [command, setCommand] = useState("goto_pose");
+  const [actionParams, setActionParams] = useState<Record<string, string | number>>({});
   const [selectedRobotCode, setSelectedRobotCode] = useState("");
   const [targetX, setTargetX] = useState(760);
   const [targetY, setTargetY] = useState(420);
@@ -134,7 +150,17 @@ export function SimulationDashboard() {
     [scenarios, selectedScenarioId]
   );
 
-  const activeTask = tasks[0] ?? null;
+  const activeTask = tasks.find((task) => task.taskId === selectedTaskId) ?? tasks[0] ?? null;
+  const taskActions = useMemo(
+    () => actions.filter((action) => !activeTask?.taskId || action.taskId === activeTask.taskId),
+    [actions, activeTask?.taskId]
+  );
+  const selectedAction = actions.find((action) => action.actionId === selectedActionId) ?? taskActions[0] ?? actions[0] ?? null;
+  const selectedCommandSpec = actionSpecs.find((spec) => spec.command === command) ?? actionSpecs[0] ?? null;
+  const currentPlanStep = activeTask?.activePlan?.steps.find((step) => step.planStepId === selectedPlanStepId)
+    ?? activeTask?.activePlan?.steps.find((step) => step.planStepId === selectedAction?.planStepId)
+    ?? activeTask?.activePlan?.steps[0]
+    ?? null;
   const robots = useMemo(() => robotsFromState(currentState, selectedScenario), [currentState, selectedScenario]);
   const filteredMessages = useMemo(() => {
     if (messageFilter === "All") {
@@ -157,13 +183,17 @@ export function SimulationDashboard() {
   }, [scenarioValidation]);
 
   async function bootstrap() {
-    const [nextScenarios, nextTemplates, nextRuns] = await Promise.all([
+    const [nextScenarios, nextTemplates, nextSpecs, nextRuns] = await Promise.all([
       getScenarios(),
       getTaskTemplates(),
+      getActionCommandSpecs(),
       getSimulationRuns()
     ]);
     setScenarios(nextScenarios);
     setTemplates(nextTemplates);
+    setActionSpecs(nextSpecs);
+    setActionParams(defaultActionParams(nextSpecs.find((spec) => spec.command === "goto_pose") ?? nextSpecs[0]));
+    setCommand(nextSpecs.find((spec) => spec.command === "goto_pose")?.command ?? nextSpecs[0]?.command ?? "goto_pose");
     setRuns(nextRuns);
     setSelectedScenarioId(nextScenarios[0]?.scenarioId ?? "default-site-a");
     setSelectedRobotCode(nextScenarios[0]?.robotCodes[0] ?? "");
@@ -196,21 +226,36 @@ export function SimulationDashboard() {
   }
 
   async function refreshRun(runId: string) {
-    const [nextTasks, nextActions, nextState, nextMessages, nextObservations] = await Promise.all([
+    const [nextTasks, nextActions, nextState, nextMessages, nextObservations, nextMetrics] = await Promise.all([
       getSimulationTasks(runId),
       getSimulationActions(runId),
       getCurrentState(runId),
       getRunMessages(runId),
-      getRunObservations(runId)
+      getRunObservations(runId),
+      getRunMessageMetrics(runId)
     ]);
     setTasks(nextTasks);
     setActions(nextActions);
     setCurrentState(nextState);
     setMessages(nextMessages);
     setObservations(nextObservations);
-    const traceId = nextTasks[0]?.traceId ?? nextActions[0]?.traceId;
+    setMessageMetrics(nextMetrics);
+    const nextTask = nextTasks.find((task) => task.taskId === selectedTaskId) ?? nextTasks[0] ?? null;
+    const nextAction = nextActions.find((action) => action.actionId === selectedActionId)
+      ?? nextActions.find((action) => action.taskId === nextTask?.taskId)
+      ?? nextActions[0]
+      ?? null;
+    if (nextTask && !selectedTaskId) {
+      setSelectedTaskId(nextTask.taskId);
+    }
+    if (nextAction && !selectedActionId) {
+      setSelectedActionId(nextAction.actionId);
+    }
+    const traceId = nextAction?.traceId ?? nextTask?.traceId;
     if (traceId) {
-      setTrace(await getTrace(traceId));
+      const [nextTrace, nextGraph] = await Promise.all([getTrace(traceId), getTraceGraph(traceId)]);
+      setTrace(nextTrace);
+      setTraceGraph(nextGraph);
     }
   }
 
@@ -226,6 +271,39 @@ export function SimulationDashboard() {
     setSelectedRobotCode(scenario?.robotCodes[0] ?? "");
     void handleValidateScenario(selectedScenarioId, false);
   }, [selectedScenarioId, scenarios]);
+
+  useEffect(() => {
+    if (!tasks.length) {
+      setSelectedTaskId("");
+      return;
+    }
+    if (!tasks.some((task) => task.taskId === selectedTaskId)) {
+      setSelectedTaskId(tasks[0].taskId);
+    }
+  }, [tasks, selectedTaskId]);
+
+  useEffect(() => {
+    if (!actions.length) {
+      setSelectedActionId("");
+      return;
+    }
+    if (!actions.some((action) => action.actionId === selectedActionId)) {
+      const nextAction = taskActions[0] ?? actions[0];
+      setSelectedActionId(nextAction.actionId);
+    }
+  }, [actions, selectedActionId, taskActions]);
+
+  useEffect(() => {
+    if (selectedAction?.planStepId) {
+      setSelectedPlanStepId(selectedAction.planStepId);
+      return;
+    }
+    setSelectedPlanStepId(activeTask?.activePlan?.steps[0]?.planStepId ?? "");
+  }, [activeTask?.activePlan?.steps, selectedAction?.planStepId]);
+
+  useEffect(() => {
+    setActionParams(defaultActionParams(selectedCommandSpec));
+  }, [selectedCommandSpec?.command]);
 
   useEffect(() => {
     if (!run) {
@@ -360,18 +438,20 @@ export function SimulationDashboard() {
     if (!run) {
       return;
     }
-    const params = command === "goto_pose" ? commandTargetParams(targetX, targetY, targetZ, targetYaw) : {};
+    const params = normalizedActionParams(actionParams, selectedCommandSpec);
     const nextAction = await createSimulationAction({
       runId: run.runId,
       taskId: activeTask?.taskId,
       planId: activeTask?.activePlan?.planId,
-      planStepId: activeTask?.activePlan?.steps[0]?.planStepId,
+      planStepId: currentPlanStep?.planStepId,
       robotCode: effectiveRobotCode,
       command,
       params,
       timeoutMs,
       operatorId: "simulation-console"
     });
+    setSelectedActionId(nextAction.actionId);
+    setSelectedPlanStepId(nextAction.planStepId ?? currentPlanStep?.planStepId ?? "");
     setStatus(`已下发 Action ${nextAction.actionId}`);
     await refreshRun(run.runId);
   }
@@ -382,26 +462,62 @@ export function SimulationDashboard() {
       setTargetY(Math.round(target.y));
     }
     setCommand(nextCommand);
+    setActionParams(defaultActionParams(actionSpecs.find((spec) => spec.command === nextCommand) ?? null));
     if (!run) {
       return;
     }
     const params =
       nextCommand === "goto_pose"
-        ? commandTargetParams(target?.x ?? targetX, target?.y ?? targetY, targetZ, targetYaw)
-        : {};
+        ? {
+            ...defaultActionParams(actionSpecs.find((spec) => spec.command === nextCommand) ?? null),
+            ...commandTargetParams(target?.x ?? targetX, target?.y ?? targetY, targetZ, targetYaw)
+          }
+        : defaultActionParams(actionSpecs.find((spec) => spec.command === nextCommand) ?? null);
     const nextAction = await createSimulationAction({
       runId: run.runId,
       taskId: activeTask?.taskId,
       planId: activeTask?.activePlan?.planId,
-      planStepId: activeTask?.activePlan?.steps[0]?.planStepId,
+      planStepId: currentPlanStep?.planStepId,
       robotCode: effectiveRobotCode,
       command: nextCommand,
       params,
       timeoutMs,
       operatorId: "simulation-console"
     });
+    setSelectedActionId(nextAction.actionId);
+    setSelectedPlanStepId(nextAction.planStepId ?? currentPlanStep?.planStepId ?? "");
     setStatus(`快捷指令已下发 ${nextAction.command}`);
     await refreshRun(run.runId);
+  }
+
+  async function handleSelectTask(taskId: string) {
+    setSelectedTaskId(taskId);
+    const task = tasks.find((item) => item.taskId === taskId);
+    setSelectedPlanStepId(task?.activePlan?.steps[0]?.planStepId ?? "");
+    if (!task) {
+      return;
+    }
+    const [nextTrace, nextGraph] = await Promise.all([getTaskTrace(task.taskId), getTraceGraph(task.traceId)]);
+    setTrace(nextTrace);
+    setTraceGraph(nextGraph);
+    setStatus(`Selected task ${task.taskId}`);
+  }
+
+  async function handleSelectAction(actionId: string) {
+    setSelectedActionId(actionId);
+    const action = actions.find((item) => item.actionId === actionId);
+    if (!action) {
+      return;
+    }
+    setSelectedPlanStepId(action.planStepId ?? "");
+    const relatedMessage = messages.find((message) => message.payload.commandId === action.commandId || message.messageId === action.commandId);
+    if (relatedMessage) {
+      setSelectedMessageId(relatedMessage.messageId);
+    }
+    const [nextTrace, nextGraph] = await Promise.all([getActionTrace(action.actionId), getTraceGraph(action.traceId)]);
+    setTrace(nextTrace);
+    setTraceGraph(nextGraph);
+    setStatus(`Selected action ${action.actionId}`);
   }
 
   async function handleInjectException() {
@@ -653,9 +769,24 @@ export function SimulationDashboard() {
                 </Button>
               </div>
               <div className="mt-4 space-y-2">
-                {tasks.slice(0, 3).map((task) => (
-                  <CompactRow key={task.taskId} label={task.goal} value={task.status} tone={statusTone(task.status)} />
+                {tasks.slice(0, 6).map((task) => (
+                  <button
+                    key={task.taskId}
+                    className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                      activeTask?.taskId === task.taskId
+                        ? "border-neutral-950 bg-white shadow-sm"
+                        : "border-neutral-200 bg-neutral-50 hover:border-neutral-300"
+                    }`}
+                    onClick={() => void handleSelectTask(task.taskId)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-800">{task.goal}</span>
+                      <Badge tone={statusTone(task.status)}>{task.status}</Badge>
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">{task.taskId}</div>
+                  </button>
                 ))}
+                {tasks.length === 0 && <EmptyState text="鏆傛棤浠诲姟" />}
               </div>
             </Panel>
 
@@ -663,15 +794,28 @@ export function SimulationDashboard() {
               <PanelTitle icon={Workflow} title="Plan" subtitle="版本与步骤" />
               <div className="mt-4 space-y-2">
                 {activeTask?.activePlan?.steps.map((step) => (
-                  <div key={step.planStepId} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                  <button
+                    key={step.planStepId}
+                    className={`w-full rounded-lg border p-3 text-left transition ${
+                      currentPlanStep?.planStepId === step.planStepId
+                        ? "border-neutral-950 bg-white shadow-sm"
+                        : "border-neutral-200 bg-neutral-50 hover:border-neutral-300"
+                    }`}
+                    onClick={() => setSelectedPlanStepId(step.planStepId)}
+                  >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{step.actionType}</span>
                       <Badge tone="neutral">Step {step.sequence}</Badge>
                     </div>
                     <div className="mt-2 text-xs text-neutral-500">{step.successCondition}</div>
-                  </div>
+                  </button>
                 )) ?? <EmptyState text="暂无任务计划" />}
               </div>
+              {currentPlanStep && (
+                <div className="mt-3 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
+                  Current Step: <span className="font-medium text-neutral-900">{currentPlanStep.actionType}</span>
+                </div>
+              )}
             </Panel>
           </div>
 
@@ -713,19 +857,11 @@ export function SimulationDashboard() {
                 </select>
                 {commandMode === "quick" ? (
                   <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="secondary"
-                      disabled={!run}
-                      onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-1"))}
-                    >
+                    <Button variant="secondary" disabled={!run} onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-1"))}>
                       <Route size={15} />
                       到装载
                     </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={!run}
-                      onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-2"))}
-                    >
+                    <Button variant="secondary" disabled={!run} onClick={() => void handleQuickAction("goto_pose", stationTarget(selectedScenario?.map, "station-2"))}>
                       <Route size={15} />
                       到分拣
                     </Button>
@@ -743,33 +879,19 @@ export function SimulationDashboard() {
                     <select
                       className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
                       value={command}
-                      onChange={(event) => setCommand(event.currentTarget.value as "goto_pose" | "where" | "stop")}
+                      onChange={(event) => setCommand(event.currentTarget.value)}
                     >
-                      <option value="goto_pose">goto_pose</option>
-                      <option value="where">where</option>
-                      <option value="stop">stop</option>
+                      {actionSpecs.map((spec) => (
+                        <option key={spec.command} value={spec.command}>
+                          {spec.command}
+                        </option>
+                      ))}
                     </select>
-                    {command === "goto_pose" ? (
-                      <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="text-xs font-semibold text-neutral-700">goto_pose 参数</span>
-                          <Badge tone="blue">坐标</Badge>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <NumberInput label="目标 X" value={targetX} onChange={setTargetX} />
-                          <NumberInput label="目标 Y" value={targetY} onChange={setTargetY} />
-                          <NumberInput label="目标 Z" value={targetZ} onChange={setTargetZ} />
-                          <NumberInput label="Yaw" value={targetYaw} onChange={setTargetYaw} />
-                        </div>
-                        <div className="mt-3 rounded-md bg-white px-3 py-2 font-mono text-[11px] text-neutral-500">
-                          {JSON.stringify(commandTargetParams(targetX, targetY, targetZ, targetYaw))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
-                        {command} 当前无需坐标参数，将以空 params 下发。
-                      </div>
-                    )}
+                    <ActionParamForm
+                      spec={selectedCommandSpec}
+                      values={actionParams}
+                      onChange={(name, value) => setActionParams((current) => ({ ...current, [name]: value }))}
+                    />
                     <NumberInput label="超时 ms" value={timeoutMs} onChange={(value) => setTimeoutMs(Math.max(1000, value))} />
                     <Button disabled={!run} onClick={handleSendAction}>
                       <SlidersHorizontal size={15} />
@@ -779,14 +901,28 @@ export function SimulationDashboard() {
                 )}
               </div>
               <div className="mt-4 space-y-2">
-                {actions.slice(0, 4).map((action) => (
-                  <CompactRow
+                <div className="flex items-center justify-between text-xs text-neutral-500">
+                  <span>Action 队列</span>
+                  <span>{taskActions.length} / {actions.length}</span>
+                </div>
+                {(taskActions.length ? taskActions : actions).slice(0, 6).map((action) => (
+                  <button
                     key={action.actionId}
-                    label={action.commandId ?? action.actionId}
-                    value={action.status}
-                    tone={statusTone(action.status)}
-                  />
+                    className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                      selectedAction?.actionId === action.actionId
+                        ? "border-neutral-950 bg-white shadow-sm"
+                        : "border-neutral-200 bg-neutral-50 hover:border-neutral-300"
+                    }`}
+                    onClick={() => void handleSelectAction(action.actionId)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-800">{action.command}</span>
+                      <Badge tone={statusTone(action.status)}>{action.status}</Badge>
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-neutral-500">{action.commandId ?? action.actionId}</div>
+                  </button>
                 ))}
+                {actions.length === 0 && <EmptyState text="暂无 Action" />}
               </div>
             </Panel>
 
@@ -899,13 +1035,28 @@ export function SimulationDashboard() {
                 <FileDown size={15} />
                 导出消息
               </Button>
-              <Button variant="secondary" onClick={handleReplayMessage} disabled={!run || !selectedMessage}>
+              <Button
+                variant="secondary"
+                onClick={handleReplayMessage}
+                disabled={!sandboxReplayEnabled || !run || !selectedMessage}
+                title="当前 sandbox replay 不触发 MQTT，但会写入当前 Workspace 调试数据，暂时禁用"
+              >
                 <RotateCcw size={15} />
-                沙箱重放
+                沙箱重放（禁用）
               </Button>
+              <Badge tone="amber">sandbox 会写入当前 Workspace 数据</Badge>
             </div>
           </div>
-          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.75fr_0.75fr_0.95fr]">
+          {messageMetrics && (
+            <div className="mb-4 grid gap-2 md:grid-cols-5">
+              <CompactRow label="Messages" value={String(messageMetrics.messageCount)} tone="blue" />
+              <CompactRow label="Errors" value={String(messageMetrics.errorCount)} tone={messageMetrics.errorCount ? "red" : "green"} />
+              <CompactRow label="Timeouts" value={String(messageMetrics.timeoutCount)} tone={messageMetrics.timeoutCount ? "amber" : "green"} />
+              <CompactRow label="Duplicates" value={String(messageMetrics.duplicateCount)} tone={messageMetrics.duplicateCount ? "amber" : "green"} />
+              <CompactRow label="Ack Avg" value={messageMetrics.ackDelayMs.avg === null ? "-" : `${messageMetrics.ackDelayMs.avg}ms`} tone="neutral" />
+            </div>
+          )}
+          <div className="grid gap-4 lg:grid-cols-[1fr_0.75fr_0.75fr_0.75fr_0.95fr]">
             <DiagnosticList
               title="Messages"
               items={filteredMessages.slice(0, 10).map((message) => ({
@@ -933,6 +1084,15 @@ export function SimulationDashboard() {
                 label: span.operation,
                 value: span.status,
                 meta: `${span.entityType}:${span.entityId}`
+              }))}
+            />
+            <DiagnosticList
+              title="Trace Graph"
+              items={(traceGraph?.nodes ?? []).slice(-10).map((node) => ({
+                id: node.id,
+                label: node.label,
+                value: node.status,
+                meta: `${node.type}:${node.entityId}`
               }))}
             />
             <MessageDetail message={selectedMessage} onCopy={handleCopyMessagePayload} />
@@ -1213,6 +1373,73 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ActionParamForm({
+  spec,
+  values,
+  onChange
+}: {
+  spec: ActionCommandSpec | null;
+  values: Record<string, string | number>;
+  onChange: (name: string, value: string | number) => void;
+}) {
+  if (!spec) {
+    return <EmptyState text="暂无指令参数规格" />;
+  }
+  const fields = Object.entries(spec.fields);
+  if (fields.length === 0) {
+    return (
+      <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+        {spec.command} 当前无需参数。
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs font-semibold text-neutral-700">{spec.command}</span>
+        <Badge tone="blue">{spec.required.length ? "required" : "optional"}</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {fields.map(([name, field]) => {
+          const value = values[name] ?? spec.defaults[name] ?? "";
+          if (field.type === "select") {
+            return (
+              <label key={name} className="block text-xs font-medium text-neutral-500">
+                {field.label ?? name}
+                <select
+                  className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+                  value={String(value)}
+                  onChange={(event) => onChange(name, event.currentTarget.value)}
+                >
+                  {(field.options ?? []).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          return (
+            <label key={name} className="block text-xs font-medium text-neutral-500">
+              {field.label ?? name}
+              <input
+                className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+                type={field.type === "number" ? "number" : "text"}
+                value={value}
+                onChange={(event) => onChange(name, field.type === "number" ? Number(event.currentTarget.value) : event.currentTarget.value)}
+              />
+            </label>
+          );
+        })}
+      </div>
+      <div className="mt-3 rounded-md bg-white px-3 py-2 font-mono text-[11px] text-neutral-500">
+        {JSON.stringify(normalizedActionParams(values, spec))}
+      </div>
+    </div>
+  );
+}
+
 function NumberInput({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   return (
     <label className="block text-xs font-medium text-neutral-500">
@@ -1274,6 +1501,42 @@ function commandTargetParams(x: number, y: number, z: number, yaw: number) {
   };
 }
 
+function defaultActionParams(spec: ActionCommandSpec | null | undefined): Record<string, string | number> {
+  if (!spec) {
+    return {};
+  }
+  const defaults = { ...spec.defaults } as Record<string, string | number>;
+  if (spec.command === "goto_pose") {
+    return {
+      x: Number(defaults.x ?? 760),
+      y: Number(defaults.y ?? 420),
+      z: Number(defaults.z ?? 0),
+      yaw: Number(defaults.yaw ?? 0),
+      speed: Number(defaults.speed ?? 1),
+      tolerance: Number(defaults.tolerance ?? 50)
+    };
+  }
+  return defaults;
+}
+
+function normalizedActionParams(
+  values: Record<string, string | number>,
+  spec: ActionCommandSpec | null
+): Record<string, unknown> {
+  if (!spec) {
+    return values;
+  }
+  const normalized: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(spec.fields)) {
+    const rawValue = values[name] ?? spec.defaults[name];
+    if (rawValue === "" || rawValue === null || rawValue === undefined) {
+      continue;
+    }
+    normalized[name] = field.type === "number" ? Number(rawValue) : rawValue;
+  }
+  return normalized;
+}
+
 function messageCategory(message: MessageRecord) {
   if (message.messageType === "command") {
     return "Command";
@@ -1282,7 +1545,7 @@ function messageCategory(message: MessageRecord) {
   if (["command.accepted", "command.rejected"].includes(event)) {
     return "Ack";
   }
-  if (["pose.updated", "where.result"].includes(event)) {
+  if (["pose.updated", "where.result", "action.progress"].includes(event)) {
     return "Telemetry";
   }
   if (event.startsWith("interface.")) {
@@ -1313,7 +1576,26 @@ function messageCategory(message: MessageRecord) {
 }
 
 function statusTone(value: string): "neutral" | "blue" | "green" | "amber" | "red" {
-  if (["Succeeded", "Running", "Accepted", "Issued", "Moving", "ok", "Event", "Telemetry", "passed"].includes(value)) {
+  if (
+    [
+      "Succeeded",
+      "Running",
+      "Accepted",
+      "Issued",
+      "Moving",
+      "Picking",
+      "Placing",
+      "Loading",
+      "Unloading",
+      "Inspecting",
+      "Charging",
+      "Waiting",
+      "ok",
+      "Event",
+      "Telemetry",
+      "passed"
+    ].includes(value)
+  ) {
     return "green";
   }
   if (["Alert", "Failed", "Rejected", "Timeout", "Error", "Offline", "critical", "failed"].includes(value)) {

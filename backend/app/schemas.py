@@ -8,6 +8,164 @@ from pydantic import BaseModel, Field
 
 
 MapObjectType = Literal["zone", "obstacle", "station", "pathNode", "resourcePoint"]
+ActionCommand = Literal[
+    "goto_pose",
+    "where",
+    "stop",
+    "pick",
+    "place",
+    "load",
+    "unload",
+    "inspect",
+    "charge",
+    "wait",
+]
+
+ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
+    "goto_pose": {
+        "label": "Move to pose",
+        "required": ["x", "y"],
+        "defaults": {"z": 0, "yaw": 0, "speed": 1.0, "tolerance": 50},
+        "fields": {
+            "x": {"type": "number", "required": True, "label": "目标 X"},
+            "y": {"type": "number", "required": True, "label": "目标 Y"},
+            "z": {"type": "number", "required": False, "label": "目标 Z"},
+            "yaw": {"type": "number", "required": False, "label": "Yaw"},
+            "speed": {"type": "number", "required": False, "label": "速度"},
+            "tolerance": {"type": "number", "required": False, "label": "容差"},
+        },
+    },
+    "where": {
+        "label": "Query robot state",
+        "required": [],
+        "defaults": {"queryMode": "pose"},
+        "fields": {
+            "queryMode": {
+                "type": "select",
+                "required": False,
+                "label": "查询模式",
+                "options": ["pose", "state", "full"],
+            }
+        },
+    },
+    "stop": {
+        "label": "Stop robot action",
+        "required": [],
+        "defaults": {"stopScope": "current_action", "reason": "manual_stop"},
+        "fields": {
+            "stopScope": {
+                "type": "select",
+                "required": False,
+                "label": "停止范围",
+                "options": ["current_action", "task", "robot"],
+            },
+            "reason": {"type": "string", "required": False, "label": "停止原因"},
+        },
+    },
+    "pick": {
+        "label": "Pick",
+        "required": ["targetId"],
+        "defaults": {"durationMinMs": 3000, "durationMaxMs": 5000},
+        "fields": {
+            "targetId": {"type": "string", "required": True, "label": "目标对象"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "place": {
+        "label": "Place",
+        "required": ["targetId"],
+        "defaults": {"durationMinMs": 3000, "durationMaxMs": 5000},
+        "fields": {
+            "targetId": {"type": "string", "required": True, "label": "目标位置"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "load": {
+        "label": "Load",
+        "required": ["stationId"],
+        "defaults": {"durationMinMs": 5000, "durationMaxMs": 8000},
+        "fields": {
+            "stationId": {"type": "string", "required": True, "label": "装载工位"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "unload": {
+        "label": "Unload",
+        "required": ["stationId"],
+        "defaults": {"durationMinMs": 5000, "durationMaxMs": 8000},
+        "fields": {
+            "stationId": {"type": "string", "required": True, "label": "卸载工位"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "inspect": {
+        "label": "Inspect",
+        "required": ["targetId"],
+        "defaults": {"durationMinMs": 4000, "durationMaxMs": 7000},
+        "fields": {
+            "targetId": {"type": "string", "required": True, "label": "巡检对象"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "charge": {
+        "label": "Charge",
+        "required": [],
+        "defaults": {"targetBattery": 95, "durationMinMs": 10000, "durationMaxMs": 15000},
+        "fields": {
+            "stationId": {"type": "string", "required": False, "label": "充电点"},
+            "targetBattery": {"type": "number", "required": False, "label": "目标电量"},
+            "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
+        },
+    },
+    "wait": {
+        "label": "Wait",
+        "required": [],
+        "defaults": {"durationMinMs": 1000, "durationMaxMs": 3000},
+        "fields": {
+            "durationMinMs": {"type": "number", "required": False, "label": "最短等待 ms"},
+            "durationMaxMs": {"type": "number", "required": False, "label": "最长等待 ms"},
+            "reason": {"type": "string", "required": False, "label": "等待原因"},
+        },
+    },
+}
+
+
+def action_command_names() -> list[str]:
+    return list(ACTION_COMMAND_SPECS.keys())
+
+
+def validate_action_params(command: str, params: dict[str, Any] | None) -> dict[str, Any]:
+    spec = ACTION_COMMAND_SPECS.get(command)
+    if spec is None:
+        raise ValueError(f"unsupported command: {command}")
+    normalized = {**spec.get("defaults", {}), **(params or {})}
+    for field_name in spec.get("required", []):
+        if normalized.get(field_name) in {None, ""}:
+            raise ValueError(f"{command} requires params.{field_name}")
+    for field_name, field_spec in spec.get("fields", {}).items():
+        if field_name not in normalized or normalized[field_name] in {None, ""}:
+            continue
+        if field_spec.get("type") == "number":
+            try:
+                normalized[field_name] = float(normalized[field_name])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{command} params.{field_name} must be a number") from exc
+        if field_spec.get("type") == "select" and normalized[field_name] not in set(field_spec.get("options", [])):
+            raise ValueError(f"{command} params.{field_name} must be one of {field_spec.get('options', [])}")
+    if "durationMinMs" in normalized and "durationMaxMs" in normalized:
+        if float(normalized["durationMinMs"]) < 0 or float(normalized["durationMaxMs"]) < float(normalized["durationMinMs"]):
+            raise ValueError(f"{command} duration range is invalid")
+    if "speed" in normalized and float(normalized["speed"]) <= 0:
+        raise ValueError("goto_pose params.speed must be greater than zero")
+    if "tolerance" in normalized and float(normalized["tolerance"]) < 0:
+        raise ValueError("goto_pose params.tolerance must not be negative")
+    return normalized
 
 
 def utc_now() -> str:
@@ -143,6 +301,14 @@ class CommandResponse(BaseModel):
     commandId: str
     topic: str
     payload: dict[str, Any]
+
+
+class ActionCommandSpec(BaseModel):
+    command: str
+    label: str
+    required: list[str] = Field(default_factory=list)
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScenarioSummary(BaseModel):
@@ -291,7 +457,7 @@ class ActionCreate(BaseModel):
     planId: str | None = None
     planStepId: str | None = None
     robotCode: str | None = None
-    command: Literal["goto_pose", "where", "stop"]
+    command: ActionCommand
     params: dict[str, Any] = Field(default_factory=dict)
     timeoutMs: int = 60000
     operatorId: str = "simulation-console"
