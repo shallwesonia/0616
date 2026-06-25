@@ -1,0 +1,6782 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Embodied Workflow Simulation Platform API",
+    "description": "2D environment configuration, message hub facade, Target Registry, robot/executor management and simulation API.",
+    "version": "0.3.0-mvp-baseline"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Health Api V1 Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections": {
+      "get": {
+        "summary": "Get Connections",
+        "operationId": "get_connections_api_v1_connections_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Connections Api V1 Connections Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/current": {
+      "get": {
+        "summary": "Get Current Map",
+        "operationId": "get_current_map_api_v1_maps_current_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteMap"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/{map_id}/drafts": {
+      "post": {
+        "summary": "Create Map Draft",
+        "operationId": "create_map_draft_api_v1_maps__map_id__drafts_post",
+        "parameters": [
+          {
+            "name": "map_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Map Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapDraftCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/{map_id}/drafts/{draft_id}/validate": {
+      "post": {
+        "summary": "Validate Map Draft",
+        "operationId": "validate_map_draft_api_v1_maps__map_id__drafts__draft_id__validate_post",
+        "parameters": [
+          {
+            "name": "map_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Map Id"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/maps/{map_id}/drafts/{draft_id}/publish": {
+      "post": {
+        "summary": "Publish Map Draft",
+        "operationId": "publish_map_draft_api_v1_maps__map_id__drafts__draft_id__publish_post",
+        "parameters": [
+          {
+            "name": "map_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Map Id"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteMap"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/imports/map": {
+      "post": {
+        "summary": "Import Map",
+        "operationId": "import_map_api_v1_imports_map_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapDraftCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robots": {
+      "get": {
+        "summary": "List Robots",
+        "operationId": "list_robots_api_v1_robots_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RobotState"
+                  },
+                  "type": "array",
+                  "title": "Response List Robots Api V1 Robots Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Robot",
+        "operationId": "create_robot_api_v1_robots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RobotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robots/{robot_id}/state": {
+      "post": {
+        "summary": "Update Robot State",
+        "operationId": "update_robot_state_api_v1_robots__robot_id__state_post",
+        "parameters": [
+          {
+            "name": "robot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RobotState"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/targets": {
+      "get": {
+        "summary": "List Targets",
+        "operationId": "list_targets_api_v1_targets_get",
+        "parameters": [
+          {
+            "name": "targetType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Targettype"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "active",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetRegistryItem"
+                  },
+                  "title": "Response List Targets Api V1 Targets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Target",
+        "operationId": "create_target_api_v1_targets_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetRegistryItemCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRegistryItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/targets/{target_id}": {
+      "get": {
+        "summary": "Get Target",
+        "operationId": "get_target_api_v1_targets__target_id__get",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRegistryItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update Target",
+        "operationId": "update_target_api_v1_targets__target_id__patch",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetRegistryItemUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRegistryItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Target",
+        "operationId": "delete_target_api_v1_targets__target_id__delete",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRegistryItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robot-configs": {
+      "get": {
+        "summary": "List Robot Configs",
+        "operationId": "list_robot_configs_api_v1_robot_configs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RobotConfig"
+                  },
+                  "type": "array",
+                  "title": "Response List Robot Configs Api V1 Robot Configs Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Robot Config",
+        "operationId": "create_robot_config_api_v1_robot_configs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RobotConfigCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robot-configs/{robot_code}": {
+      "get": {
+        "summary": "Get Robot Config",
+        "operationId": "get_robot_config_api_v1_robot_configs__robot_code__get",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update Robot Config",
+        "operationId": "update_robot_config_api_v1_robot_configs__robot_code__patch",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RobotConfigUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Robot Config",
+        "operationId": "delete_robot_config_api_v1_robot_configs__robot_code__delete",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robot-configs/{robot_code}/enable": {
+      "post": {
+        "summary": "Enable Robot Config",
+        "operationId": "enable_robot_config_api_v1_robot_configs__robot_code__enable_post",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robot-configs/{robot_code}/disable": {
+      "post": {
+        "summary": "Disable Robot Config",
+        "operationId": "disable_robot_config_api_v1_robot_configs__robot_code__disable_post",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobotConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors": {
+      "get": {
+        "summary": "List Executors",
+        "operationId": "list_executors_api_v1_executors_get",
+        "parameters": [
+          {
+            "name": "robotCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Robotcode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecutorInstance"
+                  },
+                  "title": "Response List Executors Api V1 Executors Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Executor",
+        "operationId": "create_executor_api_v1_executors_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutorInstanceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorInstance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors/{executor_id}": {
+      "get": {
+        "summary": "Get Executor",
+        "operationId": "get_executor_api_v1_executors__executor_id__get",
+        "parameters": [
+          {
+            "name": "executor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Executor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorInstance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors/{executor_id}/stop": {
+      "post": {
+        "summary": "Stop Executor",
+        "operationId": "stop_executor_api_v1_executors__executor_id__stop_post",
+        "parameters": [
+          {
+            "name": "executor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Executor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorTransitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors/{executor_id}/restart": {
+      "post": {
+        "summary": "Restart Executor",
+        "operationId": "restart_executor_api_v1_executors__executor_id__restart_post",
+        "parameters": [
+          {
+            "name": "executor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Executor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorTransitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors/{executor_id}/replace": {
+      "post": {
+        "summary": "Replace Executor",
+        "operationId": "replace_executor_api_v1_executors__executor_id__replace_post",
+        "parameters": [
+          {
+            "name": "executor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Executor Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorTransitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executors/{executor_id}/logs": {
+      "get": {
+        "summary": "Get Executor Logs",
+        "operationId": "get_executor_logs_api_v1_executors__executor_id__logs_get",
+        "parameters": [
+          {
+            "name": "executor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Executor Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorLogResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages": {
+      "get": {
+        "summary": "List Messages",
+        "operationId": "list_messages_api_v1_messages_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "messageType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Messagetype"
+            }
+          },
+          {
+            "name": "robotCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Robotcode"
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commandid"
+            }
+          },
+          {
+            "name": "traceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Traceid"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Taskid"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requestid"
+            }
+          },
+          {
+            "name": "event",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event"
+            }
+          },
+          {
+            "name": "topic",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Topic"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdfrom"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageRecord"
+                  },
+                  "title": "Response List Messages Api V1 Messages Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Message",
+        "operationId": "create_message_api_v1_messages_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageRecord"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands": {
+      "post": {
+        "summary": "Create Command",
+        "operationId": "create_command_api_v1_commands_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/action-command-specs": {
+      "get": {
+        "summary": "List Action Command Specs",
+        "operationId": "list_action_command_specs_api_v1_action_command_specs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ActionCommandSpec"
+                  },
+                  "type": "array",
+                  "title": "Response List Action Command Specs Api V1 Action Command Specs Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands/{command_id}/trace": {
+      "get": {
+        "summary": "Get Command Trace",
+        "operationId": "get_command_trace_api_v1_commands__command_id__trace_get",
+        "parameters": [
+          {
+            "name": "command_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Command Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Command Trace Api V1 Commands  Command Id  Trace Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "post": {
+        "summary": "Create Console Event",
+        "operationId": "create_console_event_api_v1_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleEventCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleEventResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/exports": {
+      "post": {
+        "summary": "Create Export",
+        "operationId": "create_export_api_v1_exports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/exports/{file_name}": {
+      "get": {
+        "summary": "Download Export",
+        "operationId": "download_export_api_v1_exports__file_name__get",
+        "parameters": [
+          {
+            "name": "file_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mqtt/contract": {
+      "get": {
+        "summary": "Get Mqtt Contract",
+        "operationId": "get_mqtt_contract_api_v1_mqtt_contract_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Mqtt Contract Api V1 Mqtt Contract Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scenarios": {
+      "get": {
+        "summary": "List Scenarios",
+        "operationId": "list_scenarios_api_v1_scenarios_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScenarioSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Scenarios Api V1 Scenarios Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}": {
+      "get": {
+        "summary": "Get Scenario",
+        "operationId": "get_scenario_api_v1_scenarios__scenario_id__get",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/validation": {
+      "get": {
+        "summary": "Validate Scenario",
+        "operationId": "validate_scenario_api_v1_scenarios__scenario_id__validation_get",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/task-templates": {
+      "get": {
+        "summary": "List Task Templates",
+        "operationId": "list_task_templates_api_v1_task_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskTemplate"
+                  },
+                  "type": "array",
+                  "title": "Response List Task Templates Api V1 Task Templates Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs": {
+      "post": {
+        "summary": "Create Simulation Run",
+        "operationId": "create_simulation_run_api_v1_simulation_runs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationRunCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Simulation Runs",
+        "operationId": "list_simulation_runs_api_v1_simulation_runs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SimulationRun"
+                  },
+                  "title": "Response List Simulation Runs Api V1 Simulation Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}": {
+      "get": {
+        "summary": "Get Simulation Run",
+        "operationId": "get_simulation_run_api_v1_simulation_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/start": {
+      "post": {
+        "summary": "Start Simulation Run",
+        "operationId": "start_simulation_run_api_v1_simulation_runs__run_id__start_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/pause": {
+      "post": {
+        "summary": "Pause Simulation Run",
+        "operationId": "pause_simulation_run_api_v1_simulation_runs__run_id__pause_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/resume": {
+      "post": {
+        "summary": "Resume Simulation Run",
+        "operationId": "resume_simulation_run_api_v1_simulation_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/stop": {
+      "post": {
+        "summary": "Stop Simulation Run",
+        "operationId": "stop_simulation_run_api_v1_simulation_runs__run_id__stop_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/tasks": {
+      "post": {
+        "summary": "Create Simulation Task",
+        "operationId": "create_simulation_task_api_v1_simulation_runs__run_id__tasks_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationTaskCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationTask"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Simulation Run Tasks",
+        "operationId": "list_simulation_run_tasks_api_v1_simulation_runs__run_id__tasks_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SimulationTask"
+                  },
+                  "title": "Response List Simulation Run Tasks Api V1 Simulation Runs  Run Id  Tasks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/tasks/from-template": {
+      "post": {
+        "summary": "Create Simulation Task From Template",
+        "operationId": "create_simulation_task_from_template_api_v1_simulation_runs__run_id__tasks_from_template_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskFromTemplateCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationTask"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/tasks/batch": {
+      "post": {
+        "summary": "Create Simulation Tasks Batch",
+        "operationId": "create_simulation_tasks_batch_api_v1_simulation_runs__run_id__tasks_batch_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchTaskCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "summary": "Get Task",
+        "operationId": "get_task_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationTask"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/plans": {
+      "get": {
+        "summary": "List Task Plans",
+        "operationId": "list_task_plans_api_v1_tasks__task_id__plans_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  },
+                  "title": "Response List Task Plans Api V1 Tasks  Task Id  Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/trace": {
+      "get": {
+        "summary": "Get Task Trace",
+        "operationId": "get_task_trace_api_v1_tasks__task_id__trace_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions": {
+      "post": {
+        "summary": "Create Action",
+        "operationId": "create_action_api_v1_actions_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationAction"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Actions",
+        "operationId": "list_actions_api_v1_actions_get",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runid"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Taskid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SimulationAction"
+                  },
+                  "title": "Response List Actions Api V1 Actions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}": {
+      "get": {
+        "summary": "Get Action",
+        "operationId": "get_action_api_v1_actions__action_id__get",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationAction"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/trace": {
+      "get": {
+        "summary": "Get Action Trace",
+        "operationId": "get_action_trace_api_v1_actions__action_id__trace_get",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/stop": {
+      "post": {
+        "summary": "Stop Action",
+        "operationId": "stop_action_api_v1_actions__action_id__stop_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationAction"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/current-states/{run_id}": {
+      "get": {
+        "summary": "Get Current State",
+        "operationId": "get_current_state_api_v1_current_states__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/schedule": {
+      "post": {
+        "summary": "Schedule Simulation Run",
+        "operationId": "schedule_simulation_run_api_v1_simulation_runs__run_id__schedule_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleScheduleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleScheduleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/robots": {
+      "get": {
+        "summary": "List Simulation Run Robots",
+        "operationId": "list_simulation_run_robots_api_v1_simulation_runs__run_id__robots_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RobotState"
+                  },
+                  "title": "Response List Simulation Run Robots Api V1 Simulation Runs  Run Id  Robots Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/resources": {
+      "get": {
+        "summary": "List Simulation Run Resources",
+        "operationId": "list_simulation_run_resources_api_v1_simulation_runs__run_id__resources_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response List Simulation Run Resources Api V1 Simulation Runs  Run Id  Resources Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/messages": {
+      "get": {
+        "summary": "List Simulation Run Messages",
+        "operationId": "list_simulation_run_messages_api_v1_simulation_runs__run_id__messages_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageRecord"
+                  },
+                  "title": "Response List Simulation Run Messages Api V1 Simulation Runs  Run Id  Messages Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/message-metrics": {
+      "get": {
+        "summary": "Get Simulation Run Message Metrics",
+        "operationId": "get_simulation_run_message_metrics_api_v1_simulation_runs__run_id__message_metrics_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Simulation Run Message Metrics Api V1 Simulation Runs  Run Id  Message Metrics Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/messages/{message_id}/replay": {
+      "post": {
+        "summary": "Replay Simulation Run Message",
+        "operationId": "replay_simulation_run_message_api_v1_simulation_runs__run_id__messages__message_id__replay_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageReplayCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageReplayResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/observations": {
+      "get": {
+        "summary": "List Simulation Run Observations",
+        "operationId": "list_simulation_run_observations_api_v1_simulation_runs__run_id__observations_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Observation"
+                  },
+                  "title": "Response List Simulation Run Observations Api V1 Simulation Runs  Run Id  Observations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/events": {
+      "post": {
+        "summary": "Inject Simulation Event",
+        "operationId": "inject_simulation_event_api_v1_simulation_runs__run_id__events_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationEventCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Observation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/events/recover": {
+      "post": {
+        "summary": "Recover Simulation Event",
+        "operationId": "recover_simulation_event_api_v1_simulation_runs__run_id__events_recover_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationEventRecoveryCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Observation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/snapshots": {
+      "post": {
+        "summary": "Create Simulation Snapshot",
+        "operationId": "create_simulation_snapshot_api_v1_simulation_runs__run_id__snapshots_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Simulation Snapshots",
+        "operationId": "list_simulation_snapshots_api_v1_simulation_runs__run_id__snapshots_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Snapshot"
+                  },
+                  "title": "Response List Simulation Snapshots Api V1 Simulation Runs  Run Id  Snapshots Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/traces/{trace_id}": {
+      "get": {
+        "summary": "Get Trace",
+        "operationId": "get_trace_api_v1_traces__trace_id__get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/traces/{trace_id}/spans": {
+      "get": {
+        "summary": "Get Trace Spans",
+        "operationId": "get_trace_spans_api_v1_traces__trace_id__spans_get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {},
+                  "title": "Response Get Trace Spans Api V1 Traces  Trace Id  Spans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/traces/{trace_id}/graph": {
+      "get": {
+        "summary": "Get Trace Graph",
+        "operationId": "get_trace_graph_api_v1_traces__trace_id__graph_get",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Trace Graph Api V1 Traces  Trace Id  Graph Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/simulation-runs/{run_id}/export": {
+      "get": {
+        "summary": "Export Simulation Run",
+        "operationId": "export_simulation_run_api_v1_simulation_runs__run_id__export_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Export Simulation Run Api V1 Simulation Runs  Run Id  Export Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActionCommandSpec": {
+        "properties": {
+          "command": {
+            "type": "string",
+            "title": "Command"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required"
+          },
+          "defaults": {
+            "type": "object",
+            "title": "Defaults"
+          },
+          "fields": {
+            "type": "object",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "command",
+          "label"
+        ],
+        "title": "ActionCommandSpec"
+      },
+      "ActionCreate": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
+          },
+          "planStepId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planstepid"
+          },
+          "robotCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotcode"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "goto_pose",
+              "where",
+              "stop",
+              "pick",
+              "place",
+              "load",
+              "unload",
+              "inspect",
+              "charge",
+              "wait"
+            ],
+            "title": "Command"
+          },
+          "params": {
+            "type": "object",
+            "title": "Params"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "title": "Timeoutms",
+            "default": 60000
+          },
+          "operatorId": {
+            "type": "string",
+            "title": "Operatorid",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runId",
+          "command"
+        ],
+        "title": "ActionCreate"
+      },
+      "AgentDecision": {
+        "properties": {
+          "decisionId": {
+            "type": "string",
+            "title": "Decisionid"
+          },
+          "workspaceId": {
+            "type": "string",
+            "title": "Workspaceid",
+            "default": "00000000-0000-0000-0000-000000000001"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "agentId": {
+            "type": "string",
+            "title": "Agentid",
+            "default": "rule-agent"
+          },
+          "agentType": {
+            "type": "string",
+            "enum": [
+              "rule",
+              "ai"
+            ],
+            "title": "Agenttype",
+            "default": "rule"
+          },
+          "decisionType": {
+            "type": "string",
+            "enum": [
+              "plan_created",
+              "action_created",
+              "wait",
+              "retry",
+              "replan",
+              "stop",
+              "escalate",
+              "failed"
+            ],
+            "title": "Decisiontype"
+          },
+          "inputRefs": {
+            "type": "object",
+            "title": "Inputrefs"
+          },
+          "currentStateVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentstateversion"
+          },
+          "selectedRobotCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectedrobotcode"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
+          },
+          "actionIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actionids"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decisionId",
+          "runId",
+          "traceId",
+          "decisionType",
+          "reason",
+          "createdAt"
+        ],
+        "title": "AgentDecision"
+      },
+      "BatchTaskCreate": {
+        "properties": {
+          "templateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Templateid"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal",
+            "default": "Batch simulation task"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "default": 3
+          },
+          "intervalMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Intervalms",
+            "default": 0
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 5
+          },
+          "targetRange": {
+            "type": "object",
+            "title": "Targetrange"
+          },
+          "parameters": {
+            "type": "object",
+            "title": "Parameters"
+          },
+          "randomSeed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Randomseed"
+          },
+          "randomizeRobot": {
+            "type": "boolean",
+            "title": "Randomizerobot",
+            "default": false
+          },
+          "randomizeTaskType": {
+            "type": "boolean",
+            "title": "Randomizetasktype",
+            "default": false
+          },
+          "autoRun": {
+            "type": "boolean",
+            "title": "Autorun",
+            "default": false
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "title": "BatchTaskCreate"
+      },
+      "BatchTaskResponse": {
+        "properties": {
+          "batchId": {
+            "type": "string",
+            "title": "Batchid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "requestedCount": {
+            "type": "integer",
+            "title": "Requestedcount"
+          },
+          "createdCount": {
+            "type": "integer",
+            "title": "Createdcount"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/SimulationTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batchId",
+          "runId",
+          "requestedCount",
+          "createdCount"
+        ],
+        "title": "BatchTaskResponse"
+      },
+      "CommandCreate": {
+        "properties": {
+          "robotId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotid"
+          },
+          "robotCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotcode"
+          },
+          "commandType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commandtype"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "target": {
+            "type": "object",
+            "title": "Target",
+            "default": {}
+          },
+          "params": {
+            "type": "object",
+            "title": "Params",
+            "default": {}
+          },
+          "parameters": {
+            "type": "object",
+            "title": "Parameters",
+            "default": {}
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "title": "Timeoutms",
+            "default": 60000
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 5
+          },
+          "issuedBy": {
+            "type": "string",
+            "title": "Issuedby",
+            "default": "agent"
+          },
+          "operatorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operatorid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          },
+          "traceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceid"
+          },
+          "idempotencyKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotencykey"
+          }
+        },
+        "type": "object",
+        "title": "CommandCreate"
+      },
+      "CommandResponse": {
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "title": "Commandid"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "payload": {
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "commandId",
+          "topic",
+          "payload"
+        ],
+        "title": "CommandResponse"
+      },
+      "ConsoleEventCreate": {
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "title": "Eventtype"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Severity",
+            "default": "warning"
+          },
+          "eventData": {
+            "type": "object",
+            "title": "Eventdata",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "eventType"
+        ],
+        "title": "ConsoleEventCreate"
+      },
+      "ConsoleEventResponse": {
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "title": "Eventid"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "payload": {
+            "type": "object",
+            "title": "Payload"
+          },
+          "mqttPublished": {
+            "type": "boolean",
+            "title": "Mqttpublished"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eventId",
+          "topic",
+          "payload",
+          "mqttPublished"
+        ],
+        "title": "ConsoleEventResponse"
+      },
+      "CurrentState": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "stateVersion": {
+            "type": "integer",
+            "title": "Stateversion"
+          },
+          "taskState": {
+            "type": "object",
+            "title": "Taskstate"
+          },
+          "activePlan": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activeplan"
+          },
+          "robotStates": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Robotstates"
+          },
+          "resourceStates": {
+            "type": "object",
+            "title": "Resourcestates"
+          },
+          "environmentState": {
+            "type": "object",
+            "title": "Environmentstate"
+          },
+          "pendingActions": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Pendingactions"
+          },
+          "activeEvents": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Activeevents"
+          },
+          "lastObservationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastobservationid"
+          },
+          "lastObservationAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastobservationat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runId",
+          "stateVersion",
+          "updatedAt"
+        ],
+        "title": "CurrentState"
+      },
+      "DraftResponse": {
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "title": "Draftid"
+          },
+          "map": {
+            "$ref": "#/components/schemas/SiteMap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draftId",
+          "map"
+        ],
+        "title": "DraftResponse"
+      },
+      "ExecutorInstance": {
+        "properties": {
+          "executorId": {
+            "type": "string",
+            "title": "Executorid"
+          },
+          "robotCode": {
+            "type": "string",
+            "title": "Robotcode"
+          },
+          "executorType": {
+            "type": "string",
+            "enum": [
+              "virtual",
+              "real_gateway"
+            ],
+            "title": "Executortype"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unbound",
+              "binding",
+              "active",
+              "offline",
+              "error",
+              "stopped",
+              "restarting",
+              "replaced"
+            ],
+            "title": "Status"
+          },
+          "mqttClientId": {
+            "type": "string",
+            "title": "Mqttclientid"
+          },
+          "lastHeartbeatAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastheartbeatat"
+          },
+          "containerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Containername"
+          },
+          "gatewayEndpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gatewayendpoint"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "executorId",
+          "robotCode",
+          "executorType",
+          "status",
+          "mqttClientId",
+          "updatedAt"
+        ],
+        "title": "ExecutorInstance"
+      },
+      "ExecutorInstanceCreate": {
+        "properties": {
+          "robotCode": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Robotcode"
+          },
+          "executorType": {
+            "type": "string",
+            "enum": [
+              "virtual",
+              "real_gateway"
+            ],
+            "title": "Executortype",
+            "default": "virtual"
+          },
+          "mqttClientId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mqttclientid"
+          },
+          "containerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Containername"
+          },
+          "gatewayEndpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gatewayendpoint"
+          },
+          "robotType": {
+            "type": "string",
+            "title": "Robottype",
+            "default": "machine-dog"
+          },
+          "startPose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetPose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotCode"
+        ],
+        "title": "ExecutorInstanceCreate"
+      },
+      "ExecutorLogResponse": {
+        "properties": {
+          "executorId": {
+            "type": "string",
+            "title": "Executorid"
+          },
+          "robotCode": {
+            "type": "string",
+            "title": "Robotcode"
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/MessageRecord"
+            },
+            "type": "array",
+            "title": "Logs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "executorId",
+          "robotCode"
+        ],
+        "title": "ExecutorLogResponse"
+      },
+      "ExecutorTransitionResponse": {
+        "properties": {
+          "executor": {
+            "$ref": "#/components/schemas/ExecutorInstance"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "executor",
+          "message"
+        ],
+        "title": "ExecutorTransitionResponse"
+      },
+      "ExportCreate": {
+        "properties": {
+          "exportType": {
+            "type": "string",
+            "title": "Exporttype"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exportType"
+        ],
+        "title": "ExportCreate"
+      },
+      "ExportResponse": {
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "title": "Exportid"
+          },
+          "fileName": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exportId",
+          "fileName",
+          "url"
+        ],
+        "title": "ExportResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MapDraftCreate": {
+        "properties": {
+          "map": {
+            "$ref": "#/components/schemas/SiteMap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "map"
+        ],
+        "title": "MapDraftCreate"
+      },
+      "MapImportResponse": {
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "title": "Draftid"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "map": {
+            "$ref": "#/components/schemas/SiteMap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draftId",
+          "ok",
+          "issues",
+          "map"
+        ],
+        "title": "MapImportResponse"
+      },
+      "MapObject": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "zone",
+              "obstacle",
+              "station",
+              "pathNode",
+              "resourcePoint"
+            ],
+            "title": "Type"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "x": {
+            "type": "number",
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "radius": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Radius"
+          },
+          "color": {
+            "type": "string",
+            "title": "Color"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "name",
+          "x",
+          "y",
+          "color"
+        ],
+        "title": "MapObject"
+      },
+      "MessageRecord": {
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "title": "Messageid"
+          },
+          "messageType": {
+            "type": "string",
+            "title": "Messagetype"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "payload": {
+            "type": "object",
+            "title": "Payload",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "messageId",
+          "messageType",
+          "source",
+          "topic",
+          "createdAt"
+        ],
+        "title": "MessageRecord"
+      },
+      "MessageReplayCreate": {
+        "properties": {
+          "replayMode": {
+            "type": "string",
+            "enum": [
+              "single",
+              "task",
+              "time_window"
+            ],
+            "title": "Replaymode",
+            "default": "single"
+          },
+          "sandbox": {
+            "type": "boolean",
+            "title": "Sandbox",
+            "default": true
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "operator replay"
+          },
+          "operatorId": {
+            "type": "string",
+            "title": "Operatorid",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "title": "MessageReplayCreate"
+      },
+      "MessageReplayResponse": {
+        "properties": {
+          "replayId": {
+            "type": "string",
+            "title": "Replayid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "replayMode": {
+            "type": "string",
+            "title": "Replaymode"
+          },
+          "sandbox": {
+            "type": "boolean",
+            "title": "Sandbox"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageRecord"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Observation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "replayId",
+          "runId",
+          "replayMode",
+          "sandbox",
+          "message"
+        ],
+        "title": "MessageReplayResponse"
+      },
+      "Observation": {
+        "properties": {
+          "observationId": {
+            "type": "string",
+            "title": "Observationid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "actionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actionid"
+          },
+          "traceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceid"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eventid"
+          },
+          "messageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messageid"
+          },
+          "robotCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotcode"
+          },
+          "commandId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commandid"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "data": {
+            "type": "object",
+            "title": "Data"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "processingStatus": {
+            "type": "string",
+            "title": "Processingstatus",
+            "default": "Applied"
+          }
+        },
+        "type": "object",
+        "required": [
+          "observationId",
+          "runId",
+          "source",
+          "event",
+          "category",
+          "timestamp"
+        ],
+        "title": "Observation"
+      },
+      "PathEdge": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "from": {
+            "type": "string",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "title": "To"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "one_way",
+              "two_way"
+            ],
+            "title": "Direction",
+            "default": "two_way"
+          },
+          "capacity": {
+            "type": "integer",
+            "title": "Capacity",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "from",
+          "to"
+        ],
+        "title": "PathEdge"
+      },
+      "PlanStep": {
+        "properties": {
+          "planStepId": {
+            "type": "string",
+            "title": "Planstepid"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "actionType": {
+            "type": "string",
+            "title": "Actiontype"
+          },
+          "target": {
+            "type": "object",
+            "title": "Target"
+          },
+          "params": {
+            "type": "object",
+            "title": "Params"
+          },
+          "dependsOn": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependson"
+          },
+          "successCondition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successcondition"
+          },
+          "failurePolicy": {
+            "type": "string",
+            "title": "Failurepolicy",
+            "default": "surface_to_operator"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "title": "Timeoutms",
+            "default": 60000
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "Pending"
+          }
+        },
+        "type": "object",
+        "required": [
+          "planStepId",
+          "sequence",
+          "actionType"
+        ],
+        "title": "PlanStep"
+      },
+      "RobotConfig": {
+        "properties": {
+          "robotCode": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Robotcode"
+          },
+          "robotName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotname"
+          },
+          "robotType": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Robottype",
+            "default": "machine-dog"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "enabled",
+              "disabled",
+              "deleted"
+            ],
+            "title": "Status",
+            "default": "enabled"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "actionSetId": {
+            "type": "string",
+            "title": "Actionsetid",
+            "default": "machine-dog-basic"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid",
+            "default": "site-a"
+          },
+          "initialPose": {
+            "$ref": "#/components/schemas/TargetPose"
+          },
+          "createMode": {
+            "type": "string",
+            "enum": [
+              "config_only",
+              "start_virtual_executor",
+              "bind_real_gateway"
+            ],
+            "title": "Createmode",
+            "default": "config_only"
+          },
+          "executorEndpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorendpoint"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "executorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorid"
+          },
+          "executorStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorstatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotCode",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "RobotConfig"
+      },
+      "RobotConfigCreate": {
+        "properties": {
+          "robotCode": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Robotcode"
+          },
+          "robotName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotname"
+          },
+          "robotType": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Robottype",
+            "default": "machine-dog"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "enabled",
+              "disabled",
+              "deleted"
+            ],
+            "title": "Status",
+            "default": "enabled"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "actionSetId": {
+            "type": "string",
+            "title": "Actionsetid",
+            "default": "machine-dog-basic"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid",
+            "default": "site-a"
+          },
+          "initialPose": {
+            "$ref": "#/components/schemas/TargetPose"
+          },
+          "createMode": {
+            "type": "string",
+            "enum": [
+              "config_only",
+              "start_virtual_executor",
+              "bind_real_gateway"
+            ],
+            "title": "Createmode",
+            "default": "config_only"
+          },
+          "executorEndpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorendpoint"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotCode"
+        ],
+        "title": "RobotConfigCreate"
+      },
+      "RobotConfigUpdate": {
+        "properties": {
+          "robotName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotname"
+          },
+          "robotType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robottype"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "enabled",
+                  "disabled",
+                  "deleted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capabilities"
+          },
+          "actionSetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actionsetid"
+          },
+          "mapId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapid"
+          },
+          "initialPose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetPose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "title": "RobotConfigUpdate"
+      },
+      "RobotCreate": {
+        "properties": {
+          "robotCode": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Robotcode"
+          },
+          "robotName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotname"
+          },
+          "robotType": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Robottype",
+            "default": "machine-dog"
+          },
+          "x": {
+            "type": "number",
+            "title": "X",
+            "default": 220
+          },
+          "y": {
+            "type": "number",
+            "title": "Y",
+            "default": 360
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": "Idle"
+          },
+          "currentAction": {
+            "type": "string",
+            "title": "Currentaction",
+            "default": "Waiting for command"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "actionSetId": {
+            "type": "string",
+            "title": "Actionsetid",
+            "default": "machine-dog-basic"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid",
+            "default": "site-a"
+          },
+          "createMode": {
+            "type": "string",
+            "enum": [
+              "config_only",
+              "start_virtual_executor",
+              "bind_real_gateway"
+            ],
+            "title": "Createmode",
+            "default": "config_only"
+          },
+          "executorEndpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorendpoint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotCode"
+        ],
+        "title": "RobotCreate"
+      },
+      "RobotState": {
+        "properties": {
+          "robotId": {
+            "type": "string",
+            "title": "Robotid"
+          },
+          "robotType": {
+            "type": "string",
+            "title": "Robottype"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "x": {
+            "type": "number",
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress",
+            "default": 0
+          },
+          "currentAction": {
+            "type": "string",
+            "title": "Currentaction"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotId",
+          "robotType",
+          "state",
+          "x",
+          "y",
+          "currentAction",
+          "updatedAt"
+        ],
+        "title": "RobotState"
+      },
+      "RuleScheduleRequest": {
+        "properties": {
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "specified_robot",
+              "idle_first",
+              "nearest",
+              "lowest_load"
+            ],
+            "title": "Strategy",
+            "default": "idle_first"
+          },
+          "robotCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robotcode"
+          },
+          "autoIssue": {
+            "type": "boolean",
+            "title": "Autoissue",
+            "default": true
+          },
+          "operatorId": {
+            "type": "string",
+            "title": "Operatorid",
+            "default": "rule-agent"
+          }
+        },
+        "type": "object",
+        "title": "RuleScheduleRequest"
+      },
+      "RuleScheduleResponse": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/AgentDecision"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimulationAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currentState": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurrentState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "RuleScheduleResponse"
+      },
+      "ScenarioSummary": {
+        "properties": {
+          "scenarioId": {
+            "type": "string",
+            "title": "Scenarioid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "siteMapId": {
+            "type": "string",
+            "title": "Sitemapid"
+          },
+          "siteMapVersion": {
+            "type": "string",
+            "title": "Sitemapversion"
+          },
+          "robotCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Robotcodes"
+          },
+          "robots": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Robots"
+          },
+          "robotTypeIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Robottypeids"
+          },
+          "actionSet": {
+            "type": "object",
+            "title": "Actionset"
+          },
+          "taskFlow": {
+            "type": "object",
+            "title": "Taskflow"
+          },
+          "resourceProfile": {
+            "type": "object",
+            "title": "Resourceprofile"
+          },
+          "map": {
+            "$ref": "#/components/schemas/SiteMap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenarioId",
+          "name",
+          "siteMapId",
+          "siteMapVersion",
+          "robotCodes",
+          "robotTypeIds",
+          "actionSet",
+          "taskFlow",
+          "resourceProfile",
+          "map"
+        ],
+        "title": "ScenarioSummary"
+      },
+      "ScenarioValidationCheck": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "warning",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "label",
+          "status",
+          "detail"
+        ],
+        "title": "ScenarioValidationCheck"
+      },
+      "ScenarioValidationResponse": {
+        "properties": {
+          "scenarioId": {
+            "type": "string",
+            "title": "Scenarioid"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioValidationCheck"
+            },
+            "type": "array",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenarioId",
+          "ok"
+        ],
+        "title": "ScenarioValidationResponse"
+      },
+      "SimulationAction": {
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "title": "Actionid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
+          },
+          "planStepId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planstepid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "robotCode": {
+            "type": "string",
+            "title": "Robotcode"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command"
+          },
+          "params": {
+            "type": "object",
+            "title": "Params"
+          },
+          "commandId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commandid"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          },
+          "attemptNo": {
+            "type": "integer",
+            "title": "Attemptno"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "title": "Timeoutms"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "issuedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuedat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actionId",
+          "runId",
+          "traceId",
+          "robotCode",
+          "command",
+          "attemptNo",
+          "timeoutMs",
+          "status",
+          "createdAt"
+        ],
+        "title": "SimulationAction"
+      },
+      "SimulationEventCreate": {
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "robot.offline",
+              "action.failed",
+              "path.blocked",
+              "interface.timeout",
+              "message.dropped",
+              "resource.locked",
+              "station.unavailable",
+              "battery.low"
+            ],
+            "title": "Eventtype"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "robot",
+              "path",
+              "station",
+              "interface",
+              "message",
+              "resource"
+            ],
+            "title": "Targettype",
+            "default": "robot"
+          },
+          "targetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetid"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Severity",
+            "default": "warning"
+          },
+          "data": {
+            "type": "object",
+            "title": "Data"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "autoRecover": {
+            "type": "boolean",
+            "title": "Autorecover",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "eventType"
+        ],
+        "title": "SimulationEventCreate"
+      },
+      "SimulationEventRecoveryCreate": {
+        "properties": {
+          "eventType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eventtype"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "robot",
+              "path",
+              "station",
+              "interface",
+              "message",
+              "resource"
+            ],
+            "title": "Targettype",
+            "default": "robot"
+          },
+          "targetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetid"
+          },
+          "recoveryMode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "auto",
+              "retry",
+              "reschedule",
+              "skip_step",
+              "takeover",
+              "terminate_task"
+            ],
+            "title": "Recoverymode",
+            "default": "manual"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "operator recovery"
+          },
+          "operatorId": {
+            "type": "string",
+            "title": "Operatorid",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "title": "SimulationEventRecoveryCreate"
+      },
+      "SimulationPlan": {
+        "properties": {
+          "planId": {
+            "type": "string",
+            "title": "Planid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "planVersion": {
+            "type": "integer",
+            "title": "Planversion"
+          },
+          "strategy": {
+            "type": "string",
+            "title": "Strategy"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "dependencies": {
+            "type": "object",
+            "title": "Dependencies"
+          },
+          "assumptions": {
+            "type": "object",
+            "title": "Assumptions"
+          },
+          "generatedBy": {
+            "type": "string",
+            "title": "Generatedby"
+          },
+          "generationLatencyMs": {
+            "type": "integer",
+            "title": "Generationlatencyms"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "activatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "planId",
+          "runId",
+          "taskId",
+          "traceId",
+          "planVersion",
+          "strategy",
+          "steps",
+          "generatedBy",
+          "generationLatencyMs",
+          "status",
+          "createdAt"
+        ],
+        "title": "SimulationPlan"
+      },
+      "SimulationRun": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "scenarioId": {
+            "type": "string",
+            "title": "Scenarioid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid"
+          },
+          "mapVersion": {
+            "type": "string",
+            "title": "Mapversion"
+          },
+          "scenario": {
+            "type": "object",
+            "title": "Scenario"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runId",
+          "scenarioId",
+          "name",
+          "status",
+          "mapId",
+          "mapVersion",
+          "scenario",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "SimulationRun"
+      },
+      "SimulationRunCreate": {
+        "properties": {
+          "scenarioId": {
+            "type": "string",
+            "title": "Scenarioid",
+            "default": "default-site-a"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "title": "SimulationRunCreate"
+      },
+      "SimulationTask": {
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "title": "Taskid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "input": {
+            "type": "object",
+            "title": "Input"
+          },
+          "constraints": {
+            "type": "object",
+            "title": "Constraints"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "expectedOutcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedoutcome"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "activePlan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimulationPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "taskId",
+          "runId",
+          "traceId",
+          "goal",
+          "priority",
+          "status",
+          "createdBy",
+          "createdAt"
+        ],
+        "title": "SimulationTask"
+      },
+      "SimulationTaskCreate": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "input": {
+            "type": "object",
+            "title": "Input"
+          },
+          "constraints": {
+            "type": "object",
+            "title": "Constraints"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 5
+          },
+          "expectedOutcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedoutcome"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal"
+        ],
+        "title": "SimulationTaskCreate"
+      },
+      "SiteMap": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "width": {
+            "type": "number",
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "title": "Height"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": "mm"
+          },
+          "gridSize": {
+            "type": "integer",
+            "title": "Gridsize",
+            "default": 40
+          },
+          "configVersion": {
+            "type": "string",
+            "title": "Configversion"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/MapObject"
+            },
+            "type": "array",
+            "title": "Objects"
+          },
+          "pathEdges": {
+            "items": {
+              "$ref": "#/components/schemas/PathEdge"
+            },
+            "type": "array",
+            "title": "Pathedges",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "width",
+          "height",
+          "configVersion",
+          "objects"
+        ],
+        "title": "SiteMap"
+      },
+      "Snapshot": {
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "title": "Snapshotid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "traceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceid"
+          },
+          "stateVersion": {
+            "type": "integer",
+            "title": "Stateversion"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "snapshot": {
+            "type": "object",
+            "title": "Snapshot"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshotId",
+          "runId",
+          "stateVersion",
+          "reason",
+          "snapshot",
+          "checksum",
+          "createdAt"
+        ],
+        "title": "Snapshot"
+      },
+      "SnapshotCreate": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "title": "SnapshotCreate"
+      },
+      "TargetPose": {
+        "properties": {
+          "x": {
+            "type": "number",
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y"
+          },
+          "z": {
+            "type": "number",
+            "title": "Z",
+            "default": 0
+          },
+          "yaw": {
+            "type": "number",
+            "title": "Yaw",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "TargetPose"
+      },
+      "TargetRegistryItem": {
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "title": "Targetid"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "cargo",
+              "container",
+              "station",
+              "resource",
+              "mapObject",
+              "inspectionPoint",
+              "zone",
+              "pathNode",
+              "pathEdge"
+            ],
+            "title": "Targettype"
+          },
+          "displayName": {
+            "type": "string",
+            "title": "Displayname"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid",
+            "default": "site-a"
+          },
+          "pose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetPose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "geometryRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometryref"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status",
+            "default": "active"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": "v1"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "targetId",
+          "targetType",
+          "displayName",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "TargetRegistryItem"
+      },
+      "TargetRegistryItemCreate": {
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "title": "Targetid"
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "cargo",
+              "container",
+              "station",
+              "resource",
+              "mapObject",
+              "inspectionPoint",
+              "zone",
+              "pathNode",
+              "pathEdge"
+            ],
+            "title": "Targettype"
+          },
+          "displayName": {
+            "type": "string",
+            "title": "Displayname"
+          },
+          "mapId": {
+            "type": "string",
+            "title": "Mapid",
+            "default": "site-a"
+          },
+          "pose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetPose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "geometryRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometryref"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "blocked",
+              "deleted"
+            ],
+            "title": "Status",
+            "default": "active"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": "v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "targetId",
+          "targetType",
+          "displayName"
+        ],
+        "title": "TargetRegistryItemCreate"
+      },
+      "TargetRegistryItemUpdate": {
+        "properties": {
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "pose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetPose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "geometryRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometryref"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "inactive",
+                  "blocked",
+                  "deleted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "title": "TargetRegistryItemUpdate"
+      },
+      "TaskFromTemplateCreate": {
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "title": "Templateid"
+          },
+          "parameters": {
+            "type": "object",
+            "title": "Parameters"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "required": [
+          "templateId"
+        ],
+        "title": "TaskFromTemplateCreate"
+      },
+      "TaskTemplate": {
+        "properties": {
+          "templateId": {
+            "type": "string",
+            "title": "Templateid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "defaultGoal": {
+            "type": "string",
+            "title": "Defaultgoal"
+          },
+          "defaultInput": {
+            "type": "object",
+            "title": "Defaultinput"
+          },
+          "supportedCommands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supportedcommands"
+          }
+        },
+        "type": "object",
+        "required": [
+          "templateId",
+          "name",
+          "description",
+          "defaultGoal"
+        ],
+        "title": "TaskTemplate"
+      },
+      "TraceResponse": {
+        "properties": {
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "runId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/TraceSpan"
+            },
+            "type": "array",
+            "title": "Spans"
+          }
+        },
+        "type": "object",
+        "required": [
+          "traceId",
+          "status"
+        ],
+        "title": "TraceResponse"
+      },
+      "TraceSpan": {
+        "properties": {
+          "spanId": {
+            "type": "string",
+            "title": "Spanid"
+          },
+          "parentSpanId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentspanid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "entityType": {
+            "type": "string",
+            "title": "Entitytype"
+          },
+          "entityId": {
+            "type": "string",
+            "title": "Entityid"
+          },
+          "operation": {
+            "type": "string",
+            "title": "Operation"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "startedAt": {
+            "type": "string",
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
+          },
+          "inputRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputref"
+          },
+          "outputRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outputref"
+          },
+          "errorRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "spanId",
+          "traceId",
+          "runId",
+          "entityType",
+          "entityId",
+          "operation",
+          "status",
+          "startedAt"
+        ],
+        "title": "TraceSpan"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "issues"
+        ],
+        "title": "ValidationResponse"
+      }
+    }
+  }
+}

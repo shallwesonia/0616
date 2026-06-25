@@ -1,5 +1,7 @@
 # 具身智能业务流程仿真平台 MVP
 
+当前基线版本：`v0.3.0-mvp-baseline`。
+
 本工程按 `.codex/docs` 中的实施文档落地：二维地图环境编辑、平台 API、WebSocket 实时展示、MQTT 消息桥接、独立虚拟机器人执行体、配置导入导出、日志导出和 Docker Compose 部署。
 
 ## 本地运行
@@ -19,6 +21,12 @@ python -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```bash
 pip install -r backend/requirements-dev.txt
 python -m pytest backend/tests
+```
+
+运行前端 smoke test：
+
+```bash
+npm --prefix frontend run smoke
 ```
 
 ```bash
@@ -58,11 +66,12 @@ Docker Compose 默认启动 3 个独立虚拟机器狗执行体：`robot-001`、
 ## 核心边界
 
 - 前端负责二维环境编辑和运行态展示，不直接下发机器人控制指令。
-- 平台 API 负责配置草稿、校验、发布、导入导出、消息记录和 MQTT 桥接。
+- 平台 API 负责配置草稿、校验、发布、导入导出、消息记录、Target Registry、机器人配置、执行体管理和 MQTT 桥接。
+- 规则调度接口先输出可追踪的 AgentDecision，并通过平台 API 创建 Action，不允许 Agent 直连 MQTT。
 - 平台 API 的地图、草稿、机器人状态、消息、导出任务和审计记录由 PostgreSQL 持久化，并按 `WORKSPACE_ID` 隔离。
 - 虚拟机器狗执行体是独立服务，只依赖 MQTT 契约；当前默认部署 3 个执行体实例，后续可逐台替换为真实机器狗网关。
 - MQTT 对外接口按机器狗 command/result 标准：`factory/dogs/{robotCode}/command`、`factory/dogs/{robotCode}/result`。
-- 第一阶段固定支持 `goto_pose`、`stop`、`where` 三类命令。
+- 当前动作集支持 `goto_pose`、`stop`、`where`、`pick`、`place`、`load`、`unload`、`inspect`、`charge`、`wait`。
 - 动作耗时使用动作配置区间随机生成，默认 `goto_pose` 为 30-35 秒。
 
 ## 指令示例
@@ -83,3 +92,7 @@ curl -X POST http://localhost:8000/api/v1/commands ^
 - `.codex/docs/机器狗MQTT接口标准_20260618.md`
 - `.codex/docs/多用户与Workspace架构标准_20260622.md`
 - `.codex/docs/仿真驾驶舱规划_20260622.md`
+- `.codex/docs/MVP基线接口契约_v0.3.0_20260624.md`
+- `.codex/docs/前端SmokeTest清单_v0.3.0_20260624.md`
+- `docs/contracts/openapi.json`
+- `docs/contracts/asyncapi.yaml`

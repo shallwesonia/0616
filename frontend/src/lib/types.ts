@@ -45,11 +45,75 @@ export interface RobotState {
 
 export interface RobotCreate {
   robotCode: string;
+  robotName?: string | null;
   robotType: string;
   x: number;
   y: number;
   state?: string;
   currentAction?: string;
+  capabilities?: string[];
+  actionSetId?: string;
+  mapId?: string;
+  createMode?: "config_only" | "start_virtual_executor" | "bind_real_gateway";
+  executorEndpoint?: string | null;
+}
+
+export type TargetType =
+  | "cargo"
+  | "container"
+  | "station"
+  | "resource"
+  | "mapObject"
+  | "inspectionPoint"
+  | "zone"
+  | "pathNode"
+  | "pathEdge";
+
+export interface TargetRegistryItem {
+  targetId: string;
+  targetType: TargetType;
+  displayName: string;
+  mapId: string;
+  pose?: { x: number; y: number; z?: number; yaw?: number } | null;
+  geometryRef?: string | null;
+  metadata: Record<string, unknown>;
+  status: "active" | "inactive" | "blocked" | "deleted";
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RobotConfig {
+  robotCode: string;
+  robotName?: string | null;
+  robotType: string;
+  status: "created" | "enabled" | "disabled" | "deleted";
+  enabled: boolean;
+  capabilities: string[];
+  actionSetId: string;
+  mapId: string;
+  initialPose: { x: number; y: number; z?: number; yaw?: number };
+  createMode: "config_only" | "start_virtual_executor" | "bind_real_gateway";
+  executorEndpoint?: string | null;
+  metadata: Record<string, unknown>;
+  executorId?: string | null;
+  executorStatus?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExecutorInstance {
+  executorId: string;
+  robotCode: string;
+  executorType: "virtual" | "real_gateway";
+  status: "unbound" | "binding" | "active" | "offline" | "error" | "stopped" | "restarting" | "replaced";
+  mqttClientId: string;
+  lastHeartbeatAt?: string | null;
+  containerName?: string | null;
+  gatewayEndpoint?: string | null;
+  startedAt?: string | null;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface MessageRecord {
@@ -278,11 +342,12 @@ export interface SimulationAction {
 
 export interface ActionCommandSpecParam {
   label: string;
-  type: "number" | "string" | "select";
+  type: "number" | "string" | "select" | "target";
   required?: boolean;
   min?: number | null;
   max?: number | null;
   options?: string[] | null;
+  targetTypes?: TargetType[] | null;
   unit?: string | null;
   description?: string | null;
 }

@@ -6,7 +6,23 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .schemas import MessageRecord, RobotState, SiteMap, new_id, utc_now
+from .schemas import (
+    ExecutorInstance,
+    ExecutorInstanceCreate,
+    RobotConfig,
+    RobotConfigCreate,
+    RobotConfigUpdate,
+    RobotState,
+    TargetRegistryItem,
+    TargetRegistryItemCreate,
+    TargetRegistryItemUpdate,
+    MessageRecord,
+    SiteMap,
+    action_command_names,
+    new_id,
+    utc_now,
+    validate_action_params,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -155,12 +171,156 @@ def default_robot_states(now: str | None = None) -> list[dict[str, Any]]:
     ]
 
 
+def default_targets_from_map(map_data: dict[str, Any] | SiteMap, now: str | None = None) -> list[dict[str, Any]]:
+    timestamp = now or utc_now()
+    map_json = map_data.model_dump(by_alias=True) if isinstance(map_data, SiteMap) else map_data
+    map_id = str(map_json.get("id") or "site-a")
+    targets: list[dict[str, Any]] = [
+        {
+            "targetId": "cargo-001",
+            "targetType": "cargo",
+            "displayName": "Cargo 001",
+            "mapId": map_id,
+            "pose": {"x": 220, "y": 240, "z": 0, "yaw": 0},
+            "geometryRef": "station-1",
+            "metadata": {"source": "seed", "compatibleActions": ["pick", "load"]},
+            "status": "active",
+            "version": "v1",
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        },
+        {
+            "targetId": "container-001",
+            "targetType": "container",
+            "displayName": "Container 001",
+            "mapId": map_id,
+            "pose": {"x": 760, "y": 420, "z": 0, "yaw": 0},
+            "geometryRef": "station-2",
+            "metadata": {"source": "seed", "compatibleActions": ["place", "unload"]},
+            "status": "active",
+            "version": "v1",
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        },
+        {
+            "targetId": "inspection-001",
+            "targetType": "inspectionPoint",
+            "displayName": "Inspection Point 001",
+            "mapId": map_id,
+            "pose": {"x": 520, "y": 360, "z": 0, "yaw": 0},
+            "geometryRef": "pathNode-2",
+            "metadata": {"source": "seed", "compatibleActions": ["inspect", "goto_pose"]},
+            "status": "active",
+            "version": "v1",
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        },
+    ]
+    object_type_map = {
+        "station": "station",
+        "resourcePoint": "resource",
+        "zone": "zone",
+        "pathNode": "pathNode",
+        "obstacle": "mapObject",
+    }
+    for item in map_json.get("objects", []):
+        target_type = object_type_map.get(item.get("type"), "mapObject")
+        targets.append(
+            {
+                "targetId": item["id"],
+                "targetType": target_type,
+                "displayName": item.get("name") or item["id"],
+                "mapId": map_id,
+                "pose": {"x": item.get("x", 0), "y": item.get("y", 0), "z": 0, "yaw": 0},
+                "geometryRef": item["id"],
+                "metadata": {"mapObjectType": item.get("type"), "source": "map"},
+                "status": "active",
+                "version": str(map_json.get("configVersion") or "v1"),
+                "createdAt": timestamp,
+                "updatedAt": timestamp,
+            }
+        )
+    for edge in map_json.get("pathEdges", []):
+        targets.append(
+            {
+                "targetId": edge["id"],
+                "targetType": "pathEdge",
+                "displayName": edge["id"],
+                "mapId": map_id,
+                "pose": None,
+                "geometryRef": edge["id"],
+                "metadata": {"from": edge.get("from"), "to": edge.get("to"), "capacity": edge.get("capacity", 1), "source": "map"},
+                "status": "active",
+                "version": str(map_json.get("configVersion") or "v1"),
+                "createdAt": timestamp,
+                "updatedAt": timestamp,
+            }
+        )
+    deduped: dict[str, dict[str, Any]] = {}
+    for target in targets:
+        deduped[target["targetId"]] = target
+    return list(deduped.values())
+
+
+def default_robot_configs(now: str | None = None) -> list[dict[str, Any]]:
+    timestamp = now or utc_now()
+    return [
+        {
+            "robotCode": robot["robotId"],
+            "robotName": robot["robotId"],
+            "robotType": robot["robotType"],
+            "status": "enabled",
+            "enabled": True,
+            "capabilities": action_command_names(),
+            "actionSetId": "machine-dog-basic",
+            "mapId": "site-a",
+            "initialPose": {"x": robot["x"], "y": robot["y"], "z": 0, "yaw": 0},
+            "createMode": "config_only",
+            "executorEndpoint": None,
+            "metadata": {"source": "seed"},
+            "executorId": None,
+            "executorStatus": None,
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        }
+        for robot in default_robot_states(timestamp)
+    ]
+
+
+def default_executor_instances(now: str | None = None) -> list[dict[str, Any]]:
+    timestamp = now or utc_now()
+    return [
+        {
+            "executorId": f"exec-{robot['robotId']}",
+            "robotCode": robot["robotId"],
+            "executorType": "virtual",
+            "status": "active",
+            "mqttClientId": f"virtual-dog-{robot['robotId']}",
+            "lastHeartbeatAt": None,
+            "containerName": f"virtual-robot-runner-{robot['robotId']}",
+            "gatewayEndpoint": None,
+            "startedAt": timestamp,
+            "updatedAt": timestamp,
+            "metadata": {
+                "ROBOT_CODE": robot["robotId"],
+                "ROBOT_TYPE": robot["robotType"],
+                "START_X": robot["x"],
+                "START_Y": robot["y"],
+            },
+        }
+        for robot in default_robot_states(timestamp)
+    ]
+
+
 def default_state() -> dict[str, Any]:
     now = utc_now()
     return {
         "map": DEFAULT_MAP,
         "drafts": {},
         "robots": default_robot_states(now),
+        "robotConfigs": default_robot_configs(now),
+        "targets": default_targets_from_map(DEFAULT_MAP, now),
+        "executors": default_executor_instances(now),
         "messages": [
             {
                 "messageId": new_id("msg"),
@@ -325,6 +485,26 @@ class JsonStore:
         if any(item["robotId"] == robot.robotId for item in state["robots"]):
             raise ValueError(f"robotCode already exists: {robot.robotId}")
         state["robots"].append(robot.model_dump())
+        state.setdefault("robotConfigs", []).append(
+            RobotConfig(
+                robotCode=robot.robotId,
+                robotName=robot.robotId,
+                robotType=robot.robotType,
+                status="enabled",
+                enabled=True,
+                capabilities=action_command_names(),
+                actionSetId="machine-dog-basic",
+                mapId="site-a",
+                initialPose={"x": robot.x, "y": robot.y, "z": 0, "yaw": 0},
+                createMode="config_only",
+                executorEndpoint=None,
+                metadata={"source": "robot-api"},
+                executorId=None,
+                executorStatus=None,
+                createdAt=robot.updatedAt,
+                updatedAt=robot.updatedAt,
+            ).model_dump()
+        )
         self.append_audit_to_state(
             state,
             "robot.created",
@@ -334,6 +514,203 @@ class JsonStore:
         )
         self.write(state)
         return robot
+
+    def list_targets(self, target_type: str | None = None, status: str | None = None) -> list[TargetRegistryItem]:
+        state = self.read()
+        state.setdefault("targets", default_targets_from_map(state.get("map", DEFAULT_MAP)))
+        targets = state["targets"]
+        if target_type:
+            targets = [item for item in targets if item.get("targetType") == target_type]
+        if status:
+            targets = [item for item in targets if item.get("status") == status]
+        return [TargetRegistryItem.model_validate(item) for item in targets]
+
+    def get_target(self, target_id: str) -> TargetRegistryItem | None:
+        return next((target for target in self.list_targets() if target.targetId == target_id), None)
+
+    def create_target(self, request: TargetRegistryItemCreate) -> TargetRegistryItem:
+        state = self.read()
+        targets = state.setdefault("targets", default_targets_from_map(state.get("map", DEFAULT_MAP)))
+        if any(item["targetId"] == request.targetId for item in targets):
+            raise ValueError(f"targetId already exists: {request.targetId}")
+        now = utc_now()
+        target = TargetRegistryItem(**request.model_dump(), createdAt=now, updatedAt=now)
+        targets.append(target.model_dump())
+        self.append_audit_to_state(state, "target.created", "target", target.targetId, after=target.model_dump())
+        self.write(state)
+        return target
+
+    def update_target(self, target_id: str, request: TargetRegistryItemUpdate) -> TargetRegistryItem | None:
+        state = self.read()
+        targets = state.setdefault("targets", default_targets_from_map(state.get("map", DEFAULT_MAP)))
+        for index, item in enumerate(targets):
+            if item["targetId"] != target_id:
+                continue
+            before = deepcopy(item)
+            patch = request.model_dump(exclude_unset=True)
+            item.update(patch)
+            item["updatedAt"] = utc_now()
+            targets[index] = item
+            self.append_audit_to_state(state, "target.updated", "target", target_id, before=before, after=item)
+            self.write(state)
+            return TargetRegistryItem.model_validate(item)
+        return None
+
+    def delete_target(self, target_id: str) -> TargetRegistryItem | None:
+        return self.update_target(target_id, TargetRegistryItemUpdate(status="deleted"))
+
+    def resolve_action_params(self, command: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        normalized = validate_action_params(command, params)
+        target_id = normalized.get("targetId") or normalized.get("stationId")
+        if not target_id:
+            return normalized
+        target = self.get_target(str(target_id))
+        if target is None or target.status != "active":
+            raise ValueError(f"unknown or inactive targetId: {target_id}")
+        if normalized.get("targetType") and normalized["targetType"] != target.targetType:
+            raise ValueError(f"targetId {target_id} is {target.targetType}, not {normalized['targetType']}")
+        normalized["targetId"] = target.targetId
+        normalized["targetType"] = target.targetType
+        normalized["targetName"] = target.displayName
+        if target.pose:
+            pose = target.pose.model_dump()
+            if command == "goto_pose":
+                normalized = {**pose, **normalized}
+            else:
+                normalized["targetPose"] = pose
+        return validate_action_params(command, normalized)
+
+    def list_robot_configs(self) -> list[RobotConfig]:
+        state = self.read()
+        state.setdefault("robotConfigs", default_robot_configs())
+        return [RobotConfig.model_validate(item) for item in state["robotConfigs"]]
+
+    def get_robot_config(self, robot_code: str) -> RobotConfig | None:
+        return next((robot for robot in self.list_robot_configs() if robot.robotCode == robot_code), None)
+
+    def create_robot_config(self, request: RobotConfigCreate) -> RobotConfig:
+        state = self.read()
+        configs = state.setdefault("robotConfigs", default_robot_configs())
+        if any(item["robotCode"] == request.robotCode for item in configs):
+            raise ValueError(f"robotCode already exists: {request.robotCode}")
+        now = utc_now()
+        executor_id: str | None = None
+        executor_status: str | None = None
+        if request.createMode in {"start_virtual_executor", "bind_real_gateway"}:
+            executor = self.create_executor(
+                ExecutorInstanceCreate(
+                    robotCode=request.robotCode,
+                    executorType="virtual" if request.createMode == "start_virtual_executor" else "real_gateway",
+                    gatewayEndpoint=request.executorEndpoint,
+                    robotType=request.robotType,
+                    startPose=request.initialPose,
+                )
+            )
+            executor_id = executor.executorId
+            executor_status = executor.status
+            state = self.read()
+            configs = state.setdefault("robotConfigs", default_robot_configs())
+        config = RobotConfig(**request.model_dump(), executorId=executor_id, executorStatus=executor_status, createdAt=now, updatedAt=now)
+        configs.append(config.model_dump())
+        if not any(item["robotId"] == request.robotCode for item in state.setdefault("robots", [])):
+            state["robots"].append(
+                RobotState(
+                    robotId=request.robotCode,
+                    robotType=request.robotType,
+                    state="Idle" if request.enabled else "Disabled",
+                    x=request.initialPose.x,
+                    y=request.initialPose.y,
+                    progress=0,
+                    currentAction="Waiting for command",
+                    updatedAt=now,
+                ).model_dump()
+            )
+        self.append_audit_to_state(state, "robot.config.created", "robot", request.robotCode, after=config.model_dump())
+        self.write(state)
+        return config
+
+    def update_robot_config(self, robot_code: str, request: RobotConfigUpdate) -> RobotConfig | None:
+        state = self.read()
+        configs = state.setdefault("robotConfigs", default_robot_configs())
+        for index, item in enumerate(configs):
+            if item["robotCode"] != robot_code:
+                continue
+            before = deepcopy(item)
+            item.update(request.model_dump(exclude_unset=True))
+            item["updatedAt"] = utc_now()
+            configs[index] = item
+            self.append_audit_to_state(state, "robot.config.updated", "robot", robot_code, before=before, after=item)
+            self.write(state)
+            return RobotConfig.model_validate(item)
+        return None
+
+    def delete_robot_config(self, robot_code: str) -> RobotConfig | None:
+        return self.update_robot_config(robot_code, RobotConfigUpdate(status="deleted", enabled=False))
+
+    def list_executors(self, robot_code: str | None = None) -> list[ExecutorInstance]:
+        state = self.read()
+        state.setdefault("executors", default_executor_instances())
+        executors = state["executors"]
+        if robot_code:
+            executors = [item for item in executors if item.get("robotCode") == robot_code]
+        return [ExecutorInstance.model_validate(item) for item in executors]
+
+    def get_executor(self, executor_id: str) -> ExecutorInstance | None:
+        return next((executor for executor in self.list_executors() if executor.executorId == executor_id), None)
+
+    def create_executor(self, request: ExecutorInstanceCreate) -> ExecutorInstance:
+        state = self.read()
+        executors = state.setdefault("executors", default_executor_instances())
+        active = [item for item in executors if item.get("robotCode") == request.robotCode and item.get("status") == "active"]
+        if active:
+            raise ValueError(f"robot {request.robotCode} already has active executor {active[0]['executorId']}")
+        now = utc_now()
+        executor_id = new_id("exec")
+        executor = ExecutorInstance(
+            executorId=executor_id,
+            robotCode=request.robotCode,
+            executorType=request.executorType,
+            status="active" if request.executorType == "virtual" else "binding",
+            mqttClientId=request.mqttClientId or f"{request.executorType}-{request.robotCode}",
+            containerName=request.containerName or (f"virtual-robot-runner-{request.robotCode}" if request.executorType == "virtual" else None),
+            gatewayEndpoint=request.gatewayEndpoint,
+            startedAt=now,
+            updatedAt=now,
+            metadata={
+                "ROBOT_CODE": request.robotCode,
+                "ROBOT_TYPE": request.robotType,
+                "START_X": request.startPose.x if request.startPose else None,
+                "START_Y": request.startPose.y if request.startPose else None,
+                **request.metadata,
+            },
+        )
+        executors.append(executor.model_dump())
+        self.append_audit_to_state(state, "executor.created", "executor", executor.executorId, after=executor.model_dump())
+        self.write(state)
+        return executor
+
+    def transition_executor(self, executor_id: str, status: str) -> ExecutorInstance | None:
+        state = self.read()
+        executors = state.setdefault("executors", default_executor_instances())
+        for index, item in enumerate(executors):
+            if item["executorId"] != executor_id:
+                continue
+            before = deepcopy(item)
+            item["status"] = status
+            item["updatedAt"] = utc_now()
+            if status == "active" and not item.get("startedAt"):
+                item["startedAt"] = item["updatedAt"]
+            executors[index] = item
+            self.append_audit_to_state(state, f"executor.{status}", "executor", executor_id, before=before, after=item)
+            self.write(state)
+            return ExecutorInstance.model_validate(item)
+        return None
+
+    def executor_logs(self, executor_id: str, limit: int = 100) -> list[MessageRecord]:
+        executor = self.get_executor(executor_id)
+        if executor is None:
+            return []
+        return self.query_messages(limit=limit, robot_code=executor.robotCode)
 
     def messages(self, limit: int = 100) -> list[MessageRecord]:
         records = self.read()["messages"]

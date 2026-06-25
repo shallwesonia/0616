@@ -1,0 +1,278 @@
+asyncapi: 3.0.0
+info:
+  title: Embodied Workflow Simulation MQTT Contract
+  version: 0.3.0-mvp-baseline
+  description: >
+    MVP baseline MQTT/AsyncAPI contract for virtual and real robot executors.
+    Platform API and Agent Service publish commands through the message hub;
+    frontend never connects to MQTT directly.
+defaultContentType: application/json
+servers:
+  workspaceMqtt:
+    host: "{host}:{port}"
+    protocol: mqtt
+    description: Workspace scoped MQTT broker.
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "18830"
+channels:
+  robotCommand:
+    address: factory/dogs/{robotCode}/command
+    parameters:
+      robotCode:
+        description: Workspace scoped robot code.
+    messages:
+      command:
+        $ref: "#/components/messages/RobotCommand"
+  robotResult:
+    address: factory/dogs/{robotCode}/result
+    parameters:
+      robotCode:
+        description: Workspace scoped robot code.
+    messages:
+      result:
+        $ref: "#/components/messages/RobotResult"
+  robotTelemetry:
+    address: factory/dogs/{robotCode}/telemetry
+    parameters:
+      robotCode:
+        description: Workspace scoped robot code.
+    messages:
+      telemetry:
+        $ref: "#/components/messages/RobotTelemetry"
+  robotEvent:
+    address: factory/dogs/{robotCode}/event
+    parameters:
+      robotCode:
+        description: Workspace scoped robot code.
+    messages:
+      event:
+        $ref: "#/components/messages/RobotEvent"
+  robotAlert:
+    address: factory/dogs/{robotCode}/alert
+    parameters:
+      robotCode:
+        description: Workspace scoped robot code.
+    messages:
+      alert:
+        $ref: "#/components/messages/RobotAlert"
+operations:
+  publishRobotCommand:
+    action: send
+    channel:
+      $ref: "#/channels/robotCommand"
+    messages:
+      - $ref: "#/channels/robotCommand/messages/command"
+  receiveRobotResult:
+    action: receive
+    channel:
+      $ref: "#/channels/robotResult"
+    messages:
+      - $ref: "#/channels/robotResult/messages/result"
+  receiveRobotTelemetry:
+    action: receive
+    channel:
+      $ref: "#/channels/robotTelemetry"
+    messages:
+      - $ref: "#/channels/robotTelemetry/messages/telemetry"
+  receiveRobotEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/robotEvent"
+    messages:
+      - $ref: "#/channels/robotEvent/messages/event"
+  receiveRobotAlert:
+    action: receive
+    channel:
+      $ref: "#/channels/robotAlert"
+    messages:
+      - $ref: "#/channels/robotAlert/messages/alert"
+components:
+  messages:
+    RobotCommand:
+      name: RobotCommand
+      title: Robot command
+      payload:
+        $ref: "#/components/schemas/RobotCommandPayload"
+    RobotResult:
+      name: RobotResult
+      title: Robot result event
+      payload:
+        $ref: "#/components/schemas/RobotResultPayload"
+    RobotTelemetry:
+      name: RobotTelemetry
+      title: Robot telemetry
+      payload:
+        $ref: "#/components/schemas/RobotResultPayload"
+    RobotEvent:
+      name: RobotEvent
+      title: Robot event
+      payload:
+        $ref: "#/components/schemas/RobotResultPayload"
+    RobotAlert:
+      name: RobotAlert
+      title: Robot alert
+      payload:
+        $ref: "#/components/schemas/RobotResultPayload"
+  schemas:
+    RobotCommandPayload:
+      type: object
+      required:
+        - schemaVersion
+        - messageType
+        - commandId
+        - robotCode
+        - traceId
+        - command
+        - issuedAt
+        - timeoutMs
+        - params
+      properties:
+        schemaVersion:
+          type: string
+          const: "1.0"
+        messageType:
+          type: string
+          const: command
+        commandId:
+          type: string
+        taskId:
+          type:
+            - string
+            - "null"
+        requestId:
+          type:
+            - string
+            - "null"
+        robotCode:
+          type: string
+        traceId:
+          type: string
+        command:
+          type: string
+          enum:
+            - goto_pose
+            - where
+            - stop
+            - pick
+            - place
+            - load
+            - unload
+            - inspect
+            - charge
+            - wait
+        issuedAt:
+          type: string
+          format: date-time
+        timeoutMs:
+          type: integer
+          minimum: 1
+        operatorId:
+          type: string
+        source:
+          type: string
+          enum:
+            - api
+            - scheduler
+            - agent
+            - system
+        params:
+          type: object
+          additionalProperties: true
+    RobotResultPayload:
+      type: object
+      required:
+        - schemaVersion
+        - messageType
+        - event
+        - robotCode
+        - traceId
+        - timestamp
+      properties:
+        schemaVersion:
+          type: string
+          const: "1.0"
+        messageType:
+          type: string
+          enum:
+            - ack
+            - telemetry
+            - event
+            - alert
+            - result
+        event:
+          type: string
+          enum:
+            - command.accepted
+            - command.rejected
+            - action.started
+            - action.progress
+            - action.succeeded
+            - action.failed
+            - task.started
+            - task.succeeded
+            - task.failed
+            - task.stopped
+            - task.timeout
+            - pose.updated
+            - where.result
+            - where.failed
+            - device.offline
+            - path.blocked
+            - fault.recovered
+        eventId:
+          type:
+            - string
+            - "null"
+        commandId:
+          type:
+            - string
+            - "null"
+        taskId:
+          type:
+            - string
+            - "null"
+        requestId:
+          type:
+            - string
+            - "null"
+        robotCode:
+          type: string
+        traceId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+x-mqtt-acl:
+  robotExecutor:
+    subscribe:
+      - factory/dogs/{robotCode}/command
+    publish:
+      - factory/dogs/{robotCode}/result
+      - factory/dogs/{robotCode}/telemetry
+      - factory/dogs/{robotCode}/event
+      - factory/dogs/{robotCode}/alert
+  platformApi:
+    subscribe:
+      - factory/dogs/+/result
+      - factory/dogs/+/telemetry
+      - factory/dogs/+/event
+      - factory/dogs/+/alert
+    publish:
+      - factory/dogs/+/command
+  frontend:
+    subscribe: []
+    publish: []
+  agentService:
+    subscribe: []
+    publish: []

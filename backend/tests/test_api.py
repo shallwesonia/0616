@@ -251,11 +251,134 @@ def test_action_command_specs_expose_standard_params():
         assert {"x", "y", "z", "yaw", "speed", "tolerance"}.issubset(commands["goto_pose"]["fields"])
         assert commands["where"]["fields"]["queryMode"]["options"] == ["pose", "state", "full"]
         assert commands["stop"]["fields"]["stopScope"]["options"] == ["current_action", "task", "robot"]
-        assert commands["pick"]["defaults"]["targetType"] == "object"
+        assert commands["pick"]["defaults"]["targetType"] == "cargo"
         assert commands["place"]["defaults"]["targetType"] == "station"
         assert commands["inspect"]["defaults"]["targetType"] == "inspectionPoint"
         assert commands["pick"]["fields"]["targetType"]["options"] == ACTION_TARGET_TYPE_OPTIONS
         assert commands["pick"]["fields"]["targetId"]["label"] == "目标对象ID"
+
+
+def test_target_registry_validates_action_targets(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-target-registry.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000089"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        targets = client.get("/api/v1/targets")
+        assert targets.status_code == 200
+        target_ids = {item["targetId"] for item in targets.json()}
+        assert {"cargo-001", "station-1", "inspection-001"}.issubset(target_ids)
+
+        run_response = client.post("/api/v1/simulation-runs", json={"scenarioId": "default-site-a"})
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+
+        action_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"targetId": "station-2", "targetType": "station"},
+            },
+        )
+        assert action_response.status_code == 200
+        payload = action_response.json()
+        assert payload["params"]["targetId"] == "station-2"
+        assert payload["params"]["x"] == 760
+        assert payload["params"]["y"] == 420
+
+        invalid = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "robotCode": "robot-001",
+                "command": "pick",
+                "params": {"targetId": "missing-cargo", "targetType": "cargo"},
+            },
+        )
+        assert invalid.status_code == 400
+        assert "targetId" in invalid.json()["detail"]
+
+
+def test_robot_config_and_executor_management(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-executors.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000090"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/v1/robot-configs",
+            json={
+                "robotCode": "robot-020",
+                "robotName": "Robot 020",
+                "robotType": "machine-dog",
+                "initialPose": {"x": 640, "y": 360, "z": 0, "yaw": 0},
+                "createMode": "start_virtual_executor",
+            },
+        )
+        assert create_response.status_code == 200
+        config = create_response.json()
+        assert config["robotCode"] == "robot-020"
+        assert config["executorId"]
+        assert config["executorStatus"] == "active"
+
+        executors = client.get("/api/v1/executors", params={"robotCode": "robot-020"})
+        assert executors.status_code == 200
+        executor = executors.json()[0]
+        assert executor["robotCode"] == "robot-020"
+        assert executor["metadata"]["ROBOT_CODE"] == "robot-020"
+
+        stop_response = client.post(f"/api/v1/executors/{executor['executorId']}/stop")
+        assert stop_response.status_code == 200
+        assert stop_response.json()["executor"]["status"] == "stopped"
+
+        disabled = client.post("/api/v1/robot-configs/robot-020/disable")
+        assert disabled.status_code == 200
+        assert disabled.json()["enabled"] is False
+
+
+def test_rule_scheduler_creates_agent_decision_and_action(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-rule-scheduler.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000091"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        run_response = client.post("/api/v1/simulation-runs", json={"scenarioId": "default-site-a"})
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+        task_response = client.post(
+            f"/api/v1/simulation-runs/{run_id}/tasks",
+            json={
+                "goal": "Schedule goto pose by rule agent",
+                "input": {"command": "goto_pose", "target": {"targetId": "station-2", "targetType": "station"}},
+            },
+        )
+        assert task_response.status_code == 200
+
+        schedule_response = client.post(
+            f"/api/v1/simulation-runs/{run_id}/schedule",
+            json={"strategy": "idle_first", "autoIssue": True},
+        )
+        assert schedule_response.status_code == 200
+        payload = schedule_response.json()
+        assert payload["decision"]["decisionType"] == "action_created"
+        assert payload["decision"]["selectedRobotCode"] == "robot-001"
+        assert payload["action"]["status"] == "Issued"
+        assert payload["action"]["commandId"].startswith("CMD-")
+
+        decisions = client.get("/api/v1/messages", params={"messageType": "agentDecision", "limit": 10})
+        assert decisions.status_code == 200
+        assert any(message["payload"]["decisionId"] == payload["decision"]["decisionId"] for message in decisions.json())
 
 
 def test_mqtt_contract_uses_dog_command_result_topics():

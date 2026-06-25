@@ -8,6 +8,22 @@ from pydantic import BaseModel, Field
 
 
 MapObjectType = Literal["zone", "obstacle", "station", "pathNode", "resourcePoint"]
+TargetType = Literal[
+    "cargo",
+    "container",
+    "station",
+    "resource",
+    "mapObject",
+    "inspectionPoint",
+    "zone",
+    "pathNode",
+    "pathEdge",
+]
+TargetStatus = Literal["active", "inactive", "blocked", "deleted"]
+RobotConfigStatus = Literal["created", "enabled", "disabled", "deleted"]
+RobotCreateMode = Literal["config_only", "start_virtual_executor", "bind_real_gateway"]
+ExecutorType = Literal["virtual", "real_gateway"]
+ExecutorStatus = Literal["unbound", "binding", "active", "offline", "error", "stopped", "restarting", "replaced"]
 ActionCommand = Literal[
     "goto_pose",
     "where",
@@ -20,16 +36,39 @@ ActionCommand = Literal[
     "charge",
     "wait",
 ]
-ACTION_TARGET_TYPE_OPTIONS = ["object", "cargo", "container", "station", "resource", "mapObject", "inspectionPoint"]
+ACTION_TARGET_TYPE_OPTIONS = [
+    "cargo",
+    "container",
+    "station",
+    "resource",
+    "mapObject",
+    "inspectionPoint",
+    "zone",
+    "pathNode",
+    "pathEdge",
+]
 
 ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "goto_pose": {
         "label": "Move to pose",
-        "required": ["x", "y"],
+        "required": [],
         "defaults": {"z": 0, "yaw": 0, "speed": 1.0, "tolerance": 50},
         "fields": {
-            "x": {"type": "number", "required": True, "label": "目标 X"},
-            "y": {"type": "number", "required": True, "label": "目标 Y"},
+            "targetId": {
+                "type": "target",
+                "required": False,
+                "label": "目标对象",
+                "targetTypes": ["station", "resource", "mapObject", "inspectionPoint", "zone", "pathNode"],
+                "description": "优先从 Target Registry 选择目标；未选择时必须填写 X/Y。",
+            },
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ACTION_TARGET_TYPE_OPTIONS,
+            },
+            "x": {"type": "number", "required": False, "label": "目标 X"},
+            "y": {"type": "number", "required": False, "label": "目标 Y"},
             "z": {"type": "number", "required": False, "label": "目标 Z"},
             "yaw": {"type": "number", "required": False, "label": "Yaw"},
             "speed": {"type": "number", "required": False, "label": "速度"},
@@ -66,7 +105,7 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     "pick": {
         "label": "Pick",
         "required": ["targetId"],
-        "defaults": {"targetType": "object", "durationMinMs": 3000, "durationMaxMs": 5000},
+        "defaults": {"targetType": "cargo", "durationMinMs": 3000, "durationMaxMs": 5000},
         "fields": {
             "targetType": {
                 "type": "select",
@@ -109,20 +148,34 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
     },
     "load": {
         "label": "Load",
-        "required": ["stationId"],
-        "defaults": {"durationMinMs": 5000, "durationMaxMs": 8000},
+        "required": ["targetId"],
+        "defaults": {"targetType": "station", "durationMinMs": 5000, "durationMaxMs": 8000},
         "fields": {
-            "stationId": {"type": "string", "required": True, "label": "装载工位"},
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ["station", "resource", "mapObject"],
+            },
+            "targetId": {"type": "target", "required": True, "label": "装载目标", "targetTypes": ["station", "resource", "mapObject"]},
+            "stationId": {"type": "string", "required": False, "label": "装载工位", "description": "兼容旧字段，后续统一使用 targetId。"},
             "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
             "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
         },
     },
     "unload": {
         "label": "Unload",
-        "required": ["stationId"],
-        "defaults": {"durationMinMs": 5000, "durationMaxMs": 8000},
+        "required": ["targetId"],
+        "defaults": {"targetType": "station", "durationMinMs": 5000, "durationMaxMs": 8000},
         "fields": {
-            "stationId": {"type": "string", "required": True, "label": "卸载工位"},
+            "targetType": {
+                "type": "select",
+                "required": False,
+                "label": "目标类型",
+                "options": ["station", "resource", "mapObject"],
+            },
+            "targetId": {"type": "target", "required": True, "label": "卸载目标", "targetTypes": ["station", "resource", "mapObject"]},
+            "stationId": {"type": "string", "required": False, "label": "卸载工位", "description": "兼容旧字段，后续统一使用 targetId。"},
             "durationMinMs": {"type": "number", "required": False, "label": "最短耗时 ms"},
             "durationMaxMs": {"type": "number", "required": False, "label": "最长耗时 ms"},
         },
@@ -182,6 +235,9 @@ def validate_action_params(command: str, params: dict[str, Any] | None) -> dict[
     if spec is None:
         raise ValueError(f"unsupported command: {command}")
     normalized = {**spec.get("defaults", {}), **(params or {})}
+    if command in {"load", "unload"} and not normalized.get("targetId") and normalized.get("stationId"):
+        normalized["targetId"] = normalized["stationId"]
+        normalized["targetType"] = normalized.get("targetType") or "station"
     for field_name in spec.get("required", []):
         if normalized.get(field_name) in {None, ""}:
             raise ValueError(f"{command} requires params.{field_name}")
@@ -195,6 +251,10 @@ def validate_action_params(command: str, params: dict[str, Any] | None) -> dict[
                 raise ValueError(f"{command} params.{field_name} must be a number") from exc
         if field_spec.get("type") == "select" and normalized[field_name] not in set(field_spec.get("options", [])):
             raise ValueError(f"{command} params.{field_name} must be one of {field_spec.get('options', [])}")
+    if command == "goto_pose" and not normalized.get("targetId"):
+        for field_name in ("x", "y"):
+            if normalized.get(field_name) in {None, ""}:
+                raise ValueError("goto_pose requires params.targetId or params.x and params.y")
     if "durationMinMs" in normalized and "durationMaxMs" in normalized:
         if float(normalized["durationMinMs"]) < 0 or float(normalized["durationMaxMs"]) < float(normalized["durationMinMs"]):
             raise ValueError(f"{command} duration range is invalid")
@@ -279,11 +339,114 @@ class RobotState(BaseModel):
 
 class RobotCreate(BaseModel):
     robotCode: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    robotName: str | None = None
     robotType: str = Field(default="machine-dog", min_length=1, max_length=64)
     x: float = 220
     y: float = 360
     state: str = "Idle"
     currentAction: str = "Waiting for command"
+    capabilities: list[str] = Field(default_factory=action_command_names)
+    actionSetId: str = "machine-dog-basic"
+    mapId: str = "site-a"
+    createMode: RobotCreateMode = "config_only"
+    executorEndpoint: str | None = None
+
+
+class TargetPose(BaseModel):
+    x: float
+    y: float
+    z: float = 0
+    yaw: float = 0
+
+
+class TargetRegistryItemCreate(BaseModel):
+    targetId: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+    targetType: TargetType
+    displayName: str
+    mapId: str = "site-a"
+    pose: TargetPose | None = None
+    geometryRef: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    status: TargetStatus = "active"
+    version: str = "v1"
+
+
+class TargetRegistryItem(TargetRegistryItemCreate):
+    createdAt: str
+    updatedAt: str
+
+
+class TargetRegistryItemUpdate(BaseModel):
+    displayName: str | None = None
+    pose: TargetPose | None = None
+    geometryRef: str | None = None
+    metadata: dict[str, Any] | None = None
+    status: TargetStatus | None = None
+    version: str | None = None
+
+
+class RobotConfigCreate(BaseModel):
+    robotCode: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    robotName: str | None = None
+    robotType: str = Field(default="machine-dog", min_length=1, max_length=64)
+    status: RobotConfigStatus = "enabled"
+    enabled: bool = True
+    capabilities: list[str] = Field(default_factory=action_command_names)
+    actionSetId: str = "machine-dog-basic"
+    mapId: str = "site-a"
+    initialPose: TargetPose = Field(default_factory=lambda: TargetPose(x=220, y=360))
+    createMode: RobotCreateMode = "config_only"
+    executorEndpoint: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RobotConfig(RobotConfigCreate):
+    executorId: str | None = None
+    executorStatus: str | None = None
+    createdAt: str
+    updatedAt: str
+
+
+class RobotConfigUpdate(BaseModel):
+    robotName: str | None = None
+    robotType: str | None = None
+    status: RobotConfigStatus | None = None
+    enabled: bool | None = None
+    capabilities: list[str] | None = None
+    actionSetId: str | None = None
+    mapId: str | None = None
+    initialPose: TargetPose | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ExecutorInstanceCreate(BaseModel):
+    robotCode: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    executorType: ExecutorType = "virtual"
+    mqttClientId: str | None = None
+    containerName: str | None = None
+    gatewayEndpoint: str | None = None
+    robotType: str = "machine-dog"
+    startPose: TargetPose | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutorInstance(BaseModel):
+    executorId: str
+    robotCode: str
+    executorType: ExecutorType
+    status: ExecutorStatus
+    mqttClientId: str
+    lastHeartbeatAt: str | None = None
+    containerName: str | None = None
+    gatewayEndpoint: str | None = None
+    startedAt: str | None = None
+    updatedAt: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutorTransitionResponse(BaseModel):
+    executor: ExecutorInstance
+    message: str
 
 
 class MessageRecord(BaseModel):
@@ -293,6 +456,12 @@ class MessageRecord(BaseModel):
     topic: str
     createdAt: str
     payload: dict[str, Any] = {}
+
+
+class ExecutorLogResponse(BaseModel):
+    executorId: str
+    robotCode: str
+    logs: list[MessageRecord] = Field(default_factory=list)
 
 
 class ExportCreate(BaseModel):
@@ -565,6 +734,69 @@ class CurrentState(BaseModel):
     lastObservationId: str | None = None
     lastObservationAt: str | None = None
     updatedAt: str
+
+
+class ResourceLock(BaseModel):
+    lockId: str
+    resourceType: str
+    resourceId: str
+    holderType: str
+    holderId: str
+    status: Literal["pending", "locked", "released", "expired", "failed"] = "pending"
+    expiresAt: str | None = None
+
+
+class PathOccupancy(BaseModel):
+    occupancyId: str
+    pathId: str
+    edgeId: str | None = None
+    robotCode: str
+    actionId: str | None = None
+    fromPose: dict[str, Any] = Field(default_factory=dict)
+    toPose: dict[str, Any] = Field(default_factory=dict)
+    timeWindow: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["reserved", "occupied", "released", "blocked"] = "reserved"
+
+
+class StationCapacity(BaseModel):
+    stationId: str
+    capacity: int = 1
+    occupied: int = 0
+    queue: list[str] = Field(default_factory=list)
+    policy: Literal["fifo", "priority", "manual"] = "fifo"
+
+
+class AgentDecision(BaseModel):
+    decisionId: str
+    workspaceId: str = "00000000-0000-0000-0000-000000000001"
+    runId: str
+    taskId: str | None = None
+    traceId: str
+    agentId: str = "rule-agent"
+    agentType: Literal["rule", "ai"] = "rule"
+    decisionType: Literal["plan_created", "action_created", "wait", "retry", "replan", "stop", "escalate", "failed"]
+    inputRefs: dict[str, Any] = Field(default_factory=dict)
+    currentStateVersion: int | None = None
+    selectedRobotCode: str | None = None
+    planId: str | None = None
+    actionIds: list[str] = Field(default_factory=list)
+    reason: str
+    confidence: float | None = None
+    createdAt: str
+
+
+class RuleScheduleRequest(BaseModel):
+    taskId: str | None = None
+    strategy: Literal["specified_robot", "idle_first", "nearest", "lowest_load"] = "idle_first"
+    robotCode: str | None = None
+    autoIssue: bool = True
+    operatorId: str = "rule-agent"
+
+
+class RuleScheduleResponse(BaseModel):
+    decision: AgentDecision
+    action: SimulationAction | None = None
+    currentState: CurrentState | None = None
 
 
 class SimulationEventCreate(BaseModel):

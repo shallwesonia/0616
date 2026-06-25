@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, JSON, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -57,6 +57,55 @@ class MapDraftRecord(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class TargetRegistryRecord(Base):
+    __tablename__ = "target_registry"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "target_id", name="uk_target_registry_target_id"),
+        Index("idx_target_registry_type", "workspace_id", "target_type", "status"),
+        Index("idx_target_registry_map", "workspace_id", "map_id"),
+        {"schema": "config"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    map_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    pose_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
+    geometry_ref: Mapped[str | None] = mapped_column(String(128))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="v1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+
+class RobotConfigRecord(Base):
+    __tablename__ = "robot_configs"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "robot_code", name="uk_robot_configs_code"),
+        Index("idx_robot_configs_status", "workspace_id", "status", "enabled"),
+        {"schema": "config"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    robot_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    robot_name: Mapped[str | None] = mapped_column(String(256))
+    robot_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="enabled")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    capabilities_json: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    action_set_id: Mapped[str] = mapped_column(String(128), nullable=False, default="machine-dog-basic")
+    map_id: Mapped[str] = mapped_column(String(128), nullable=False, default="site-a")
+    initial_pose_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    executor_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+
 class RobotInstanceRecord(Base):
     __tablename__ = "robot_instances"
     __table_args__ = (
@@ -74,6 +123,29 @@ class RobotInstanceRecord(Base):
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_action: Mapped[str] = mapped_column(String(256), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+class ExecutorInstanceRecord(Base):
+    __tablename__ = "executor_instances"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "executor_id", name="uk_executor_instances_executor_id"),
+        Index("idx_executor_instances_robot", "workspace_id", "robot_code", "status"),
+        {"schema": "runtime"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    executor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    robot_code: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    executor_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="unbound")
+    mqtt_client_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    container_name: Mapped[str | None] = mapped_column(String(256))
+    gateway_endpoint: Mapped[str | None] = mapped_column(String(512))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
 
 
 class MessageRecordRow(Base):

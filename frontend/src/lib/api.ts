@@ -4,6 +4,7 @@ import type {
   ConnectionInfo,
   CurrentState,
   DraftResponse,
+  ExecutorInstance,
   BatchTaskResponse,
   ActionCommandSpec,
   HealthResponse,
@@ -11,6 +12,7 @@ import type {
   MessageRecord,
   MqttContract,
   Observation,
+  RobotConfig,
   RobotCreate,
   RobotState,
   ScenarioSummary,
@@ -23,7 +25,8 @@ import type {
   TaskTemplate,
   RunMessageMetrics,
   TraceGraph,
-  TraceResponse
+  TraceResponse,
+  TargetRegistryItem
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -87,6 +90,33 @@ export function createRobot(robot: RobotCreate) {
     method: "POST",
     body: JSON.stringify(robot)
   });
+}
+
+export function getTargets() {
+  return request<TargetRegistryItem[]>("/api/v1/targets");
+}
+
+export function getRobotConfigs() {
+  return request<RobotConfig[]>("/api/v1/robot-configs");
+}
+
+export function createRobotConfig(robot: {
+  robotCode: string;
+  robotName?: string | null;
+  robotType: string;
+  initialPose: { x: number; y: number; z?: number; yaw?: number };
+  createMode?: "config_only" | "start_virtual_executor" | "bind_real_gateway";
+  executorEndpoint?: string | null;
+}) {
+  return request<RobotConfig>("/api/v1/robot-configs", {
+    method: "POST",
+    body: JSON.stringify(robot)
+  });
+}
+
+export function getExecutors(robotCode?: string) {
+  const query = robotCode ? `?robotCode=${encodeURIComponent(robotCode)}` : "";
+  return request<ExecutorInstance[]>(`/api/v1/executors${query}`);
 }
 
 export function getMessages() {

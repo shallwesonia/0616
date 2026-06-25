@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from .mqtt_bridge import PlatformMqttBridge
 from .mqtt_contract import MQTT_CONTRACT
 from .schemas import (
+    AgentDecision,
     BatchTaskCreate,
     BatchTaskResponse,
     ACTION_COMMAND_SPECS,
@@ -21,6 +22,10 @@ from .schemas import (
     ConsoleEventCreate,
     ConsoleEventResponse,
     DraftResponse,
+    ExecutorInstance,
+    ExecutorInstanceCreate,
+    ExecutorLogResponse,
+    ExecutorTransitionResponse,
     ExportCreate,
     ExportResponse,
     ActionCreate,
@@ -31,8 +36,13 @@ from .schemas import (
     MessageReplayCreate,
     MessageReplayResponse,
     Observation,
+    RobotConfig,
+    RobotConfigCreate,
+    RobotConfigUpdate,
     RobotCreate,
     RobotState,
+    RuleScheduleRequest,
+    RuleScheduleResponse,
     ScenarioSummary,
     ScenarioValidationResponse,
     SiteMap,
@@ -45,6 +55,9 @@ from .schemas import (
     SimulationTaskCreate,
     Snapshot,
     SnapshotCreate,
+    TargetRegistryItem,
+    TargetRegistryItemCreate,
+    TargetRegistryItemUpdate,
     TaskFromTemplateCreate,
     TaskTemplate,
     TraceResponse,
@@ -72,8 +85,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Embodied Workflow Simulation Platform API",
-    version="0.1.0",
-    description="2D environment configuration, message hub facade, export and robot state API.",
+    version="0.3.0-mvp-baseline",
+    description="2D environment configuration, message hub facade, Target Registry, robot/executor management and simulation API.",
     lifespan=lifespan,
 )
 
@@ -277,6 +290,162 @@ def update_robot_state(robot_id: str, robot: RobotState) -> RobotState:
     return robot
 
 
+@app.get("/api/v1/targets", response_model=list[TargetRegistryItem])
+def list_targets(targetType: str | None = None, status: str | None = "active") -> list[TargetRegistryItem]:
+    if not hasattr(store, "list_targets"):
+        raise HTTPException(status_code=501, detail="Target Registry is not available")
+    return store.list_targets(target_type=targetType, status=status)
+
+
+@app.post("/api/v1/targets", response_model=TargetRegistryItem)
+def create_target(request: TargetRegistryItemCreate) -> TargetRegistryItem:
+    if not hasattr(store, "create_target"):
+        raise HTTPException(status_code=501, detail="Target Registry is not available")
+    try:
+        return store.create_target(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/targets/{target_id}", response_model=TargetRegistryItem)
+def get_target(target_id: str) -> TargetRegistryItem:
+    target = store.get_target(target_id) if hasattr(store, "get_target") else None
+    if target is None:
+        raise HTTPException(status_code=404, detail="target not found")
+    return target
+
+
+@app.patch("/api/v1/targets/{target_id}", response_model=TargetRegistryItem)
+def update_target(target_id: str, request: TargetRegistryItemUpdate) -> TargetRegistryItem:
+    target = store.update_target(target_id, request) if hasattr(store, "update_target") else None
+    if target is None:
+        raise HTTPException(status_code=404, detail="target not found")
+    return target
+
+
+@app.delete("/api/v1/targets/{target_id}", response_model=TargetRegistryItem)
+def delete_target(target_id: str) -> TargetRegistryItem:
+    target = store.delete_target(target_id) if hasattr(store, "delete_target") else None
+    if target is None:
+        raise HTTPException(status_code=404, detail="target not found")
+    return target
+
+
+@app.get("/api/v1/robot-configs", response_model=list[RobotConfig])
+def list_robot_configs() -> list[RobotConfig]:
+    if not hasattr(store, "list_robot_configs"):
+        raise HTTPException(status_code=501, detail="robot config management is not available")
+    return store.list_robot_configs()
+
+
+@app.post("/api/v1/robot-configs", response_model=RobotConfig)
+def create_robot_config(request: RobotConfigCreate) -> RobotConfig:
+    if not hasattr(store, "create_robot_config"):
+        raise HTTPException(status_code=501, detail="robot config management is not available")
+    try:
+        return store.create_robot_config(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/robot-configs/{robot_code}", response_model=RobotConfig)
+def get_robot_config(robot_code: str) -> RobotConfig:
+    config = store.get_robot_config(robot_code) if hasattr(store, "get_robot_config") else None
+    if config is None:
+        raise HTTPException(status_code=404, detail="robot config not found")
+    return config
+
+
+@app.patch("/api/v1/robot-configs/{robot_code}", response_model=RobotConfig)
+def update_robot_config(robot_code: str, request: RobotConfigUpdate) -> RobotConfig:
+    config = store.update_robot_config(robot_code, request) if hasattr(store, "update_robot_config") else None
+    if config is None:
+        raise HTTPException(status_code=404, detail="robot config not found")
+    return config
+
+
+@app.post("/api/v1/robot-configs/{robot_code}/enable", response_model=RobotConfig)
+def enable_robot_config(robot_code: str) -> RobotConfig:
+    config = store.update_robot_config(robot_code, RobotConfigUpdate(status="enabled", enabled=True)) if hasattr(store, "update_robot_config") else None
+    if config is None:
+        raise HTTPException(status_code=404, detail="robot config not found")
+    return config
+
+
+@app.post("/api/v1/robot-configs/{robot_code}/disable", response_model=RobotConfig)
+def disable_robot_config(robot_code: str) -> RobotConfig:
+    config = store.update_robot_config(robot_code, RobotConfigUpdate(status="disabled", enabled=False)) if hasattr(store, "update_robot_config") else None
+    if config is None:
+        raise HTTPException(status_code=404, detail="robot config not found")
+    return config
+
+
+@app.delete("/api/v1/robot-configs/{robot_code}", response_model=RobotConfig)
+def delete_robot_config(robot_code: str) -> RobotConfig:
+    config = store.delete_robot_config(robot_code) if hasattr(store, "delete_robot_config") else None
+    if config is None:
+        raise HTTPException(status_code=404, detail="robot config not found")
+    return config
+
+
+@app.get("/api/v1/executors", response_model=list[ExecutorInstance])
+def list_executors(robotCode: str | None = None) -> list[ExecutorInstance]:
+    if not hasattr(store, "list_executors"):
+        raise HTTPException(status_code=501, detail="executor management is not available")
+    return store.list_executors(robot_code=robotCode)
+
+
+@app.post("/api/v1/executors", response_model=ExecutorInstance)
+def create_executor(request: ExecutorInstanceCreate) -> ExecutorInstance:
+    if not hasattr(store, "create_executor"):
+        raise HTTPException(status_code=501, detail="executor management is not available")
+    try:
+        return store.create_executor(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/executors/{executor_id}", response_model=ExecutorInstance)
+def get_executor(executor_id: str) -> ExecutorInstance:
+    executor = store.get_executor(executor_id) if hasattr(store, "get_executor") else None
+    if executor is None:
+        raise HTTPException(status_code=404, detail="executor not found")
+    return executor
+
+
+@app.post("/api/v1/executors/{executor_id}/stop", response_model=ExecutorTransitionResponse)
+def stop_executor(executor_id: str) -> ExecutorTransitionResponse:
+    executor = store.transition_executor(executor_id, "stopped") if hasattr(store, "transition_executor") else None
+    if executor is None:
+        raise HTTPException(status_code=404, detail="executor not found")
+    return ExecutorTransitionResponse(executor=executor, message="executor marked as stopped")
+
+
+@app.post("/api/v1/executors/{executor_id}/restart", response_model=ExecutorTransitionResponse)
+def restart_executor(executor_id: str) -> ExecutorTransitionResponse:
+    executor = store.transition_executor(executor_id, "active") if hasattr(store, "transition_executor") else None
+    if executor is None:
+        raise HTTPException(status_code=404, detail="executor not found")
+    return ExecutorTransitionResponse(executor=executor, message="executor marked as active")
+
+
+@app.post("/api/v1/executors/{executor_id}/replace", response_model=ExecutorTransitionResponse)
+def replace_executor(executor_id: str) -> ExecutorTransitionResponse:
+    executor = store.transition_executor(executor_id, "replaced") if hasattr(store, "transition_executor") else None
+    if executor is None:
+        raise HTTPException(status_code=404, detail="executor not found")
+    return ExecutorTransitionResponse(executor=executor, message="executor marked as replaced")
+
+
+@app.get("/api/v1/executors/{executor_id}/logs", response_model=ExecutorLogResponse)
+def get_executor_logs(executor_id: str, limit: int = 100) -> ExecutorLogResponse:
+    executor = store.get_executor(executor_id) if hasattr(store, "get_executor") else None
+    if executor is None:
+        raise HTTPException(status_code=404, detail="executor not found")
+    logs = store.executor_logs(executor_id, limit=limit) if hasattr(store, "executor_logs") else []
+    return ExecutorLogResponse(executorId=executor.executorId, robotCode=executor.robotCode, logs=logs)
+
+
 @app.get("/api/v1/messages", response_model=list[MessageRecord])
 def list_messages(
     limit: int = 100,
@@ -343,7 +512,10 @@ def _issue_command(command: CommandCreate) -> CommandResponse:
         raise HTTPException(status_code=400, detail="robotCode or robotId is required")
     command_name = _normalize_command_name(command.command or command.commandType)
     try:
-        params = validate_action_params(command_name, _command_params(command))
+        if hasattr(store, "resolve_action_params"):
+            params = store.resolve_action_params(command_name, _command_params(command))
+        else:
+            params = validate_action_params(command_name, _command_params(command))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -497,6 +669,50 @@ def _broadcast_runtime_event(
         )
     )
     return bridge.publish(topic, payload, qos=1, retain=False)
+
+
+def _record_agent_decision(decision: AgentDecision) -> None:
+    store.append_message(
+        MessageRecord(
+            messageId=decision.decisionId,
+            messageType="agentDecision",
+            source=decision.agentId,
+            topic=f"agent/decisions/{decision.decisionId}",
+            createdAt=decision.createdAt,
+            payload=decision.model_dump(),
+        )
+    )
+
+
+def _enabled_robot_codes() -> set[str]:
+    if not hasattr(store, "list_robot_configs"):
+        return {robot.robotId for robot in store.robots()}
+    return {
+        config.robotCode
+        for config in store.list_robot_configs()
+        if config.enabled and config.status == "enabled"
+    }
+
+
+def _select_robot_for_schedule(request: RuleScheduleRequest, state: CurrentState | None) -> str | None:
+    enabled = _enabled_robot_codes()
+    robots = []
+    if state:
+        robots = [
+            item
+            for item in state.robotStates
+            if str(item.get("robotId") or item.get("robotCode")) in enabled
+            and str(item.get("state", "")).lower() not in {"offline", "disabled", "error"}
+        ]
+    if not robots:
+        robots = [robot.model_dump() for robot in store.robots() if robot.robotId in enabled]
+    if request.robotCode:
+        return request.robotCode if request.robotCode in {str(item.get("robotId") or item.get("robotCode")) for item in robots} else None
+    if not robots:
+        return None
+    if request.strategy == "lowest_load":
+        return str(min(robots, key=lambda item: int(item.get("progress") or 0)).get("robotId") or robots[0].get("robotCode"))
+    return str(robots[0].get("robotId") or robots[0].get("robotCode"))
 
 
 @app.post("/api/v1/exports", response_model=ExportResponse)
@@ -721,6 +937,117 @@ def get_current_state(run_id: str) -> CurrentState:
     if state is None:
         raise HTTPException(status_code=404, detail="current state not found")
     return state
+
+
+@app.post("/api/v1/simulation-runs/{run_id}/schedule", response_model=RuleScheduleResponse)
+def schedule_simulation_run(run_id: str, request: RuleScheduleRequest) -> RuleScheduleResponse:
+    run = store.get_simulation_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    tasks = store.list_run_tasks(run_id)
+    task = next((item for item in tasks if item.taskId == request.taskId), None) if request.taskId else (tasks[0] if tasks else None)
+    state = store.get_current_state(run_id)
+    trace_id = task.traceId if task else run_id
+    selected_robot = _select_robot_for_schedule(request, state)
+
+    if task is None or task.activePlan is None:
+        decision = AgentDecision(
+            decisionId=protocol_id("DECISION"),
+            runId=run_id,
+            taskId=task.taskId if task else None,
+            traceId=trace_id,
+            decisionType="failed",
+            inputRefs={"taskId": request.taskId, "strategy": request.strategy},
+            currentStateVersion=state.stateVersion if state else None,
+            selectedRobotCode=selected_robot,
+            reason="no task or active plan available for scheduling",
+            confidence=1.0,
+            createdAt=utc_now(),
+        )
+        _record_agent_decision(decision)
+        return RuleScheduleResponse(decision=decision, action=None, currentState=state)
+
+    if selected_robot is None:
+        decision = AgentDecision(
+            decisionId=protocol_id("DECISION"),
+            runId=run_id,
+            taskId=task.taskId,
+            traceId=trace_id,
+            decisionType="wait",
+            inputRefs={"taskId": task.taskId, "strategy": request.strategy},
+            currentStateVersion=state.stateVersion if state else None,
+            selectedRobotCode=None,
+            planId=task.activePlan.planId,
+            reason="no enabled online robot is available",
+            confidence=1.0,
+            createdAt=utc_now(),
+        )
+        _record_agent_decision(decision)
+        return RuleScheduleResponse(decision=decision, action=None, currentState=state)
+
+    step = next((item for item in task.activePlan.steps if item.status not in {"Succeeded", "Failed", "Cancelled"}), task.activePlan.steps[0])
+    action: SimulationAction | None = None
+    action_ids: list[str] = []
+    decision_type = "plan_created"
+    reason = f"rule scheduler selected {selected_robot} by {request.strategy}"
+    if request.autoIssue:
+        try:
+            created = store.create_action(
+                ActionCreate(
+                    runId=run_id,
+                    taskId=task.taskId,
+                    planId=task.activePlan.planId,
+                    planStepId=step.planStepId,
+                    robotCode=selected_robot,
+                    command=step.actionType,
+                    params=step.params or step.target,
+                    timeoutMs=step.timeoutMs,
+                    operatorId=request.operatorId,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if created is None:
+            raise HTTPException(status_code=404, detail="simulation task not found")
+        command_response = _issue_command(
+            CommandCreate(
+                robotCode=created.robotCode,
+                command=created.command,
+                params=created.params,
+                timeoutMs=created.timeoutMs,
+                issuedBy="agent",
+                operatorId=request.operatorId,
+                taskId=created.taskId,
+                traceId=created.traceId,
+            )
+        )
+        action = store.mark_action_issued(
+            created.actionId,
+            command_response.commandId,
+            command_response.payload.get("requestId"),
+            command_response.payload,
+        )
+        action_ids = [created.actionId]
+        decision_type = "action_created"
+        reason = f"rule scheduler selected {selected_robot} and issued {created.command}"
+
+    decision = AgentDecision(
+        decisionId=protocol_id("DECISION"),
+        runId=run_id,
+        taskId=task.taskId,
+        traceId=trace_id,
+        decisionType=decision_type,
+        inputRefs={"taskId": task.taskId, "planId": task.activePlan.planId, "planStepId": step.planStepId, "strategy": request.strategy},
+        currentStateVersion=state.stateVersion if state else None,
+        selectedRobotCode=selected_robot,
+        planId=task.activePlan.planId,
+        actionIds=action_ids,
+        reason=reason,
+        confidence=1.0,
+        createdAt=utc_now(),
+    )
+    _record_agent_decision(decision)
+    return RuleScheduleResponse(decision=decision, action=action, currentState=store.get_current_state(run_id))
 
 
 @app.get("/api/v1/simulation-runs/{run_id}/robots", response_model=list[RobotState])

@@ -30,7 +30,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Panel } from "./components/ui";
 import {
-  createRobot,
+  createRobotConfig,
   createSimulationAction,
   createSimulationRun,
   createSimulationSnapshot,
@@ -41,6 +41,8 @@ import {
   getActionCommandSpecs,
   getActionTrace,
   getCurrentState,
+  getExecutors,
+  getRobotConfigs,
   getRunMessages,
   getRunMessageMetrics,
   getRunObservations,
@@ -51,6 +53,7 @@ import {
   getSimulationTasks,
   getTaskTrace,
   getTaskTemplates,
+  getTargets,
   getTrace,
   getTraceGraph,
   injectSimulationEvent,
@@ -65,9 +68,11 @@ import {
 import type {
   ActionCommandSpec,
   CurrentState,
+  ExecutorInstance,
   MapObject,
   MessageRecord,
   Observation,
+  RobotConfig,
   RobotState,
   RunMessageMetrics,
   ScenarioSummary,
@@ -78,6 +83,7 @@ import type {
   SimulationTask,
   SiteMap,
   TaskTemplate,
+  TargetRegistryItem,
   TraceGraph,
   TraceResponse
 } from "./lib/types";
@@ -109,6 +115,9 @@ export function SimulationDashboard() {
   const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [actionSpecs, setActionSpecs] = useState<ActionCommandSpec[]>([]);
+  const [targets, setTargets] = useState<TargetRegistryItem[]>([]);
+  const [robotConfigs, setRobotConfigs] = useState<RobotConfig[]>([]);
+  const [executors, setExecutors] = useState<ExecutorInstance[]>([]);
   const [runs, setRuns] = useState<SimulationRun[]>([]);
   const [run, setRun] = useState<SimulationRun | null>(null);
   const [tasks, setTasks] = useState<SimulationTask[]>([]);
@@ -149,6 +158,8 @@ export function SimulationDashboard() {
   const [newRobotType, setNewRobotType] = useState("machine-dog");
   const [newRobotX, setNewRobotX] = useState(520);
   const [newRobotY, setNewRobotY] = useState(360);
+  const [newRobotMode, setNewRobotMode] = useState<"config_only" | "start_virtual_executor" | "bind_real_gateway">("config_only");
+  const [newRobotGateway, setNewRobotGateway] = useState("");
   const [status, setStatus] = useState("仿真驾驶舱待连接");
 
   const selectedScenario = useMemo(
@@ -173,20 +184,32 @@ export function SimulationDashboard() {
     const robotCodes = scenarioRobotCodes.length ? scenarioRobotCodes : robots.map((robot) => robot.robotId);
     return Array.from(new Set(robotCodes.length ? robotCodes : ["robot-001"]));
   }, [robots, selectedScenario]);
+  const effectiveRobotCode = selectedRobotCode || availableRobotCodes[0] || robots[0]?.robotId || "robot-001";
   const filteredMessages = useMemo(() => {
-    if (messageFilter === "All") {
-      return messages;
+    const categoryMessages =
+      messageFilter === "All"
+        ? messages
+        : messages.filter((message) => messageCategory(message) === messageFilter);
+    if (!effectiveRobotCode) {
+      return categoryMessages;
     }
-    return messages.filter((message) => messageCategory(message) === messageFilter);
-  }, [messageFilter, messages]);
+    return categoryMessages.filter((message) => {
+      const payloadRobot = String(message.payload.robotCode ?? message.payload.robotId ?? "");
+      const topic = String(message.topic ?? "");
+      return payloadRobot === effectiveRobotCode || topic.includes(`/${effectiveRobotCode}/`);
+    });
+  }, [effectiveRobotCode, messageFilter, messages]);
   const selectedMessage = useMemo(
     () => messages.find((message) => message.messageId === selectedMessageId) ?? filteredMessages[0] ?? null,
     [filteredMessages, messages, selectedMessageId]
   );
-  const effectiveRobotCode = selectedRobotCode || availableRobotCodes[0] || robots[0]?.robotId || "robot-001";
   const selectedRobot = robots.find((robot) => robot.robotId === effectiveRobotCode) ?? robots[0] ?? null;
   const selectedExceptionOption = exceptionOptions.find((item) => item.value === exceptionType) ?? exceptionOptions[0];
-  const visibleActionQueue = taskActions.length ? taskActions : actions;
+  const visibleActionQueue = (taskActions.length ? taskActions : actions).filter(
+    (action) => !effectiveRobotCode || action.robotCode === effectiveRobotCode
+  );
+  const visibleObservations = observations.filter((observation) => !effectiveRobotCode || observation.robotCode === effectiveRobotCode);
+  const targetOptions = targets.filter((target) => target.status === "active");
   const suggestedRobotCode = useMemo(() => nextRobotCode(availableRobotCodes), [availableRobotCodes]);
   const scenarioCheckSummary = useMemo(() => {
     const checks = scenarioValidation?.checks ?? [];
@@ -198,15 +221,21 @@ export function SimulationDashboard() {
   }, [scenarioValidation]);
 
   async function bootstrap() {
-    const [nextScenarios, nextTemplates, nextSpecs, nextRuns] = await Promise.all([
+    const [nextScenarios, nextTemplates, nextSpecs, nextRuns, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
       getScenarios(),
       getTaskTemplates(),
       getActionCommandSpecs(),
-      getSimulationRuns()
+      getSimulationRuns(),
+      getTargets(),
+      getRobotConfigs(),
+      getExecutors()
     ]);
     setScenarios(nextScenarios);
     setTemplates(nextTemplates);
     setActionSpecs(nextSpecs);
+    setTargets(nextTargets);
+    setRobotConfigs(nextRobotConfigs);
+    setExecutors(nextExecutors);
     setActionParams(defaultActionParams(nextSpecs.find((spec) => spec.command === "goto_pose") ?? nextSpecs[0]));
     setCommand(nextSpecs.find((spec) => spec.command === "goto_pose")?.command ?? nextSpecs[0]?.command ?? "goto_pose");
     setRuns(nextRuns);
@@ -241,13 +270,16 @@ export function SimulationDashboard() {
   }
 
   async function refreshRun(runId: string) {
-    const [nextTasks, nextActions, nextState, nextMessages, nextObservations, nextMetrics] = await Promise.all([
+    const [nextTasks, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
       getSimulationTasks(runId),
       getSimulationActions(runId),
       getCurrentState(runId),
       getRunMessages(runId),
       getRunObservations(runId),
-      getRunMessageMetrics(runId)
+      getRunMessageMetrics(runId),
+      getTargets(),
+      getRobotConfigs(),
+      getExecutors()
     ]);
     setTasks(nextTasks);
     setActions(nextActions);
@@ -255,6 +287,9 @@ export function SimulationDashboard() {
     setMessages(nextMessages);
     setObservations(nextObservations);
     setMessageMetrics(nextMetrics);
+    setTargets(nextTargets);
+    setRobotConfigs(nextRobotConfigs);
+    setExecutors(nextExecutors);
     const nextTask = nextTasks.find((task) => task.taskId === selectedTaskId) ?? nextTasks[0] ?? null;
     const nextAction = nextActions.find((action) => action.actionId === selectedActionId)
       ?? nextActions.find((action) => action.taskId === nextTask?.taskId)
@@ -398,21 +433,23 @@ export function SimulationDashboard() {
       return;
     }
     try {
-      const robot = await createRobot({
+      const config = await createRobotConfig({
         robotCode,
+        robotName: robotCode,
         robotType,
-        x: newRobotX,
-        y: newRobotY,
-        state: "Idle",
-        currentAction: "Waiting for command"
+        initialPose: { x: newRobotX, y: newRobotY, z: 0, yaw: 0 },
+        createMode: newRobotMode,
+        executorEndpoint: newRobotMode === "bind_real_gateway" ? newRobotGateway.trim() || null : null
       });
-      const nextScenarios = await getScenarios();
+      const [nextScenarios, nextConfigs, nextExecutors] = await Promise.all([getScenarios(), getRobotConfigs(), getExecutors()]);
       setScenarios(nextScenarios);
-      setSelectedRobotCode(robot.robotId);
-      setExceptionTarget(robot.robotId);
-      setNewRobotCode(nextRobotCode([...availableRobotCodes, robot.robotId]));
+      setRobotConfigs(nextConfigs);
+      setExecutors(nextExecutors);
+      setSelectedRobotCode(config.robotCode);
+      setExceptionTarget(config.robotCode);
+      setNewRobotCode(nextRobotCode([...availableRobotCodes, config.robotCode]));
       setNewRobotX((current) => current + 100);
-      setStatus(`已添加机器人 ${robot.robotId}`);
+      setStatus(`已添加机器人配置 ${config.robotCode}`);
       await handleValidateScenario(selectedScenarioId, false);
       if (run) {
         await refreshRun(run.runId);
@@ -772,11 +809,43 @@ export function SimulationDashboard() {
                     <NumberInput label="初始 X" value={newRobotX} onChange={setNewRobotX} />
                     <NumberInput label="初始 Y" value={newRobotY} onChange={setNewRobotY} />
                   </div>
+                  <select
+                    className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                    value={newRobotMode}
+                    onChange={(event) => setNewRobotMode(event.currentTarget.value as typeof newRobotMode)}
+                  >
+                    <option value="config_only">仅登记配置</option>
+                    <option value="start_virtual_executor">同步启动虚拟执行体</option>
+                    <option value="bind_real_gateway">绑定真实机器人网关</option>
+                  </select>
+                  {newRobotMode === "bind_real_gateway" && (
+                    <input
+                      className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                      value={newRobotGateway}
+                      onChange={(event) => setNewRobotGateway(event.currentTarget.value)}
+                      placeholder="mqtt-gateway://robot-004"
+                    />
+                  )}
                   <Button variant="secondary" onClick={() => void handleCreateRobot()}>
                     <Plus size={15} />
                     添加机器人
                   </Button>
                 </div>
+              </div>
+              <div className="mt-4 grid gap-2">
+                <div className="flex items-center justify-between text-xs text-neutral-500">
+                  <span>执行体</span>
+                  <span>{executors.filter((executor) => executor.status === "active").length} active / {executors.length}</span>
+                </div>
+                <CompactRow label="机器人配置" value={`${robotConfigs.filter((robot) => robot.enabled).length} enabled / ${robotConfigs.length}`} tone="blue" />
+                {executors.slice(0, 4).map((executor) => (
+                  <CompactRow
+                    key={executor.executorId}
+                    label={executor.robotCode}
+                    value={`${executor.executorType} / ${executor.status}`}
+                    tone={executor.status === "active" ? "green" : executor.status === "error" ? "red" : "amber"}
+                  />
+                ))}
               </div>
               {selectedScenario && (
                 <div className="mt-4 grid gap-2 text-xs text-neutral-500">
@@ -981,6 +1050,7 @@ export function SimulationDashboard() {
                     <ActionParamForm
                       spec={selectedCommandSpec}
                       values={actionParams}
+                      targetOptions={targetOptions}
                       onChange={(name, value) => setActionParams((current) => ({ ...current, [name]: value }))}
                     />
                     <NumberInput label="超时 ms" value={timeoutMs} onChange={(value) => setTimeoutMs(Math.max(1000, value))} />
@@ -1201,7 +1271,7 @@ export function SimulationDashboard() {
             />
             <DiagnosticList
               title="Observations"
-              items={observations.slice(0, 10).map((item) => ({
+              items={visibleObservations.slice(0, 10).map((item) => ({
                 id: item.observationId,
                 label: item.event,
                 value: item.category,
@@ -1507,10 +1577,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function ActionParamForm({
   spec,
   values,
+  targetOptions,
   onChange
 }: {
   spec: ActionCommandSpec | null;
   values: Record<string, string | number>;
+  targetOptions: TargetRegistryItem[];
   onChange: (name: string, value: string | number) => void;
 }) {
   if (!spec) {
@@ -1533,6 +1605,29 @@ function ActionParamForm({
       <div className="grid grid-cols-2 gap-2">
         {fields.map(([name, field]) => {
           const value = values[name] ?? spec.defaults[name] ?? "";
+          if (field.type === "target") {
+            const allowedTypes = new Set(field.targetTypes ?? []);
+            const options = allowedTypes.size
+              ? targetOptions.filter((target) => allowedTypes.has(target.targetType))
+              : targetOptions;
+            return (
+              <label key={name} className="block text-xs font-medium text-neutral-500">
+                {field.label ?? name}
+                <select
+                  className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+                  value={String(value)}
+                  onChange={(event) => onChange(name, event.currentTarget.value)}
+                >
+                  <option value="">选择目标对象</option>
+                  {options.map((target) => (
+                    <option key={target.targetId} value={target.targetId}>
+                      {target.displayName} / {target.targetId}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
           if (field.type === "select") {
             return (
               <label key={name} className="block text-xs font-medium text-neutral-500">

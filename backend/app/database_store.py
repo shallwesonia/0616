@@ -14,9 +14,11 @@ from .database import Database, workspace_id_from_env
 from .db_models import (
     AuditLogRecord,
     Base,
+    ExecutorInstanceRecord,
     ExportJobRecord,
     MapDraftRecord,
     MessageRecordRow,
+    RobotConfigRecord,
     RobotInstanceRecord,
     SimulationActionRecord,
     SimulationCurrentStateRecord,
@@ -29,6 +31,7 @@ from .db_models import (
     SimulationTraceHeaderRecord,
     SimulationTraceSpanRecord,
     SiteMapRecord,
+    TargetRegistryRecord,
     now_utc,
 )
 from .runtime_cache import RuntimeCache
@@ -37,11 +40,16 @@ from .schemas import (
     BatchTaskCreate,
     BatchTaskResponse,
     CurrentState,
+    ExecutorInstance,
+    ExecutorInstanceCreate,
     MessageReplayCreate,
     MessageReplayResponse,
     MessageRecord,
     Observation,
     PlanStep,
+    RobotConfig,
+    RobotConfigCreate,
+    RobotConfigUpdate,
     RobotState,
     ScenarioSummary,
     ScenarioValidationCheck,
@@ -61,13 +69,27 @@ from .schemas import (
     TraceResponse,
     TraceSpan,
     SiteMap,
+    TargetRegistryItem,
+    TargetRegistryItemCreate,
+    TargetRegistryItemUpdate,
     action_command_names,
     new_id,
     protocol_id,
     utc_now,
     validate_action_params,
 )
-from .store import DATA_DIR, DEFAULT_MAP, EXPORT_DIR, STATE_PATH, JsonStore, default_robot_states, default_state
+from .store import (
+    DATA_DIR,
+    DEFAULT_MAP,
+    EXPORT_DIR,
+    STATE_PATH,
+    JsonStore,
+    default_executor_instances,
+    default_robot_configs,
+    default_robot_states,
+    default_state,
+    default_targets_from_map,
+)
 
 
 def parse_datetime(value: str | datetime | None) -> datetime:
@@ -165,6 +187,15 @@ class DatabaseStore(JsonStore):
             for robot in state.get("robots", []):
                 session.add(self._robot_row(RobotState.model_validate(robot)))
 
+            for target in state.get("targets") or default_targets_from_map(map_data):
+                session.add(self._target_row(TargetRegistryItem.model_validate(target)))
+
+            for config in state.get("robotConfigs") or default_robot_configs():
+                session.add(self._robot_config_row(RobotConfig.model_validate(config)))
+
+            for executor in state.get("executors") or default_executor_instances():
+                session.add(self._executor_row(ExecutorInstance.model_validate(executor)))
+
             seen_message_ids: set[str] = set()
             for message_data in state.get("messages", []):
                 message = MessageRecord.model_validate(message_data)
@@ -217,6 +248,45 @@ class DatabaseStore(JsonStore):
                 if robot.robotId not in existing_codes:
                     session.add(self._robot_row(robot))
                     existing_codes.add(robot.robotId)
+
+            existing_config_codes = set(
+                session.scalars(
+                    select(RobotConfigRecord.robot_code).where(
+                        RobotConfigRecord.workspace_id == self.workspace_id
+                    )
+                ).all()
+            )
+            for config_data in default_robot_configs():
+                config = RobotConfig.model_validate(config_data)
+                if config.robotCode not in existing_config_codes:
+                    session.add(self._robot_config_row(config))
+                    existing_config_codes.add(config.robotCode)
+
+            existing_target_ids = set(
+                session.scalars(
+                    select(TargetRegistryRecord.target_id).where(
+                        TargetRegistryRecord.workspace_id == self.workspace_id
+                    )
+                ).all()
+            )
+            for target_data in default_targets_from_map(DEFAULT_MAP):
+                target = TargetRegistryItem.model_validate(target_data)
+                if target.targetId not in existing_target_ids:
+                    session.add(self._target_row(target))
+                    existing_target_ids.add(target.targetId)
+
+            existing_executor_ids = set(
+                session.scalars(
+                    select(ExecutorInstanceRecord.executor_id).where(
+                        ExecutorInstanceRecord.workspace_id == self.workspace_id
+                    )
+                ).all()
+            )
+            for executor_data in default_executor_instances():
+                executor = ExecutorInstance.model_validate(executor_data)
+                if executor.executorId not in existing_executor_ids:
+                    session.add(self._executor_row(executor))
+                    existing_executor_ids.add(executor.executorId)
 
     def current_map(self) -> SiteMap:
         with self.database.session() as session:
@@ -480,6 +550,35 @@ class DatabaseStore(JsonStore):
             if existing is not None:
                 raise ValueError(f"robotCode already exists: {robot.robotId}")
             session.add(self._robot_row(robot))
+            config_exists = session.scalar(
+                select(RobotConfigRecord.id).where(
+                    RobotConfigRecord.workspace_id == self.workspace_id,
+                    RobotConfigRecord.robot_code == robot.robotId,
+                )
+            )
+            if config_exists is None:
+                session.add(
+                    self._robot_config_row(
+                        RobotConfig(
+                            robotCode=robot.robotId,
+                            robotName=robot.robotId,
+                            robotType=robot.robotType,
+                            status="enabled",
+                            enabled=True,
+                            capabilities=action_command_names(),
+                            actionSetId="machine-dog-basic",
+                            mapId="site-a",
+                            initialPose={"x": robot.x, "y": robot.y, "z": 0, "yaw": 0},
+                            createMode="config_only",
+                            executorEndpoint=None,
+                            metadata={"source": "robot-api"},
+                            executorId=None,
+                            executorStatus=None,
+                            createdAt=robot.updatedAt,
+                            updatedAt=robot.updatedAt,
+                        )
+                    )
+                )
             self._add_audit(
                 session,
                 "robot.created",
@@ -489,6 +588,294 @@ class DatabaseStore(JsonStore):
             )
         self.runtime_cache.set_robot(robot)
         return robot
+
+    def list_targets(self, target_type: str | None = None, status: str | None = None) -> list[TargetRegistryItem]:
+        query = select(TargetRegistryRecord).where(TargetRegistryRecord.workspace_id == self.workspace_id)
+        if target_type:
+            query = query.where(TargetRegistryRecord.target_type == target_type)
+        if status:
+            query = query.where(TargetRegistryRecord.status == status)
+        with self.database.session() as session:
+            rows = session.scalars(query.order_by(TargetRegistryRecord.target_type, TargetRegistryRecord.target_id)).all()
+            return [self._target_model(row) for row in rows]
+
+    def get_target(self, target_id: str) -> TargetRegistryItem | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(TargetRegistryRecord).where(
+                    TargetRegistryRecord.workspace_id == self.workspace_id,
+                    TargetRegistryRecord.target_id == target_id,
+                )
+            )
+            return self._target_model(row) if row else None
+
+    def create_target(self, request: TargetRegistryItemCreate) -> TargetRegistryItem:
+        now = now_utc()
+        target = TargetRegistryItem(**request.model_dump(), createdAt=iso_datetime(now), updatedAt=iso_datetime(now))
+        with self.database.session() as session:
+            existing = session.scalar(
+                select(TargetRegistryRecord.id).where(
+                    TargetRegistryRecord.workspace_id == self.workspace_id,
+                    TargetRegistryRecord.target_id == target.targetId,
+                )
+            )
+            if existing is not None:
+                raise ValueError(f"targetId already exists: {target.targetId}")
+            session.add(self._target_row(target))
+            self._add_audit(session, "target.created", "target", target.targetId, after=target.model_dump())
+        return target
+
+    def update_target(self, target_id: str, request: TargetRegistryItemUpdate) -> TargetRegistryItem | None:
+        now = now_utc()
+        with self.database.session() as session:
+            row = session.scalar(
+                select(TargetRegistryRecord).where(
+                    TargetRegistryRecord.workspace_id == self.workspace_id,
+                    TargetRegistryRecord.target_id == target_id,
+                )
+            )
+            if row is None:
+                return None
+            before = self._target_model(row).model_dump()
+            patch = request.model_dump(exclude_unset=True)
+            for key, value in patch.items():
+                if key == "displayName":
+                    row.display_name = value
+                elif key == "pose":
+                    row.pose_json = value
+                elif key == "geometryRef":
+                    row.geometry_ref = value
+                elif key == "metadata":
+                    row.metadata_json = value
+                elif key == "status":
+                    row.status = value
+                elif key == "version":
+                    row.version = value
+            row.updated_at = now
+            updated = self._target_model(row)
+            self._add_audit(session, "target.updated", "target", target_id, before=before, after=updated.model_dump())
+            return updated
+
+    def delete_target(self, target_id: str) -> TargetRegistryItem | None:
+        return self.update_target(target_id, TargetRegistryItemUpdate(status="deleted"))
+
+    def resolve_action_params(self, command: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        normalized = validate_action_params(command, params)
+        target_id = normalized.get("targetId") or normalized.get("stationId")
+        if not target_id:
+            return normalized
+        target = self.get_target(str(target_id))
+        if target is None or target.status != "active":
+            raise ValueError(f"unknown or inactive targetId: {target_id}")
+        if normalized.get("targetType") and normalized["targetType"] != target.targetType:
+            raise ValueError(f"targetId {target_id} is {target.targetType}, not {normalized['targetType']}")
+        normalized["targetId"] = target.targetId
+        normalized["targetType"] = target.targetType
+        normalized["targetName"] = target.displayName
+        if target.pose:
+            pose = target.pose.model_dump()
+            if command == "goto_pose":
+                normalized = {**pose, **normalized}
+            else:
+                normalized["targetPose"] = pose
+        return validate_action_params(command, normalized)
+
+    def list_robot_configs(self) -> list[RobotConfig]:
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(RobotConfigRecord)
+                .where(RobotConfigRecord.workspace_id == self.workspace_id)
+                .order_by(RobotConfigRecord.robot_code)
+            ).all()
+            return [self._robot_config_model(row) for row in rows]
+
+    def get_robot_config(self, robot_code: str) -> RobotConfig | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(RobotConfigRecord).where(
+                    RobotConfigRecord.workspace_id == self.workspace_id,
+                    RobotConfigRecord.robot_code == robot_code,
+                )
+            )
+            return self._robot_config_model(row) if row else None
+
+    def create_robot_config(self, request: RobotConfigCreate) -> RobotConfig:
+        now = now_utc()
+        executor_id: str | None = None
+        executor_status: str | None = None
+        if request.createMode in {"start_virtual_executor", "bind_real_gateway"}:
+            executor = self.create_executor(
+                ExecutorInstanceCreate(
+                    robotCode=request.robotCode,
+                    executorType="virtual" if request.createMode == "start_virtual_executor" else "real_gateway",
+                    gatewayEndpoint=request.executorEndpoint,
+                    robotType=request.robotType,
+                    startPose=request.initialPose,
+                )
+            )
+            executor_id = executor.executorId
+            executor_status = executor.status
+        config = RobotConfig(**request.model_dump(), executorId=executor_id, executorStatus=executor_status, createdAt=iso_datetime(now), updatedAt=iso_datetime(now))
+        with self.database.session() as session:
+            existing = session.scalar(
+                select(RobotConfigRecord.id).where(
+                    RobotConfigRecord.workspace_id == self.workspace_id,
+                    RobotConfigRecord.robot_code == request.robotCode,
+                )
+            )
+            if existing is not None:
+                raise ValueError(f"robotCode already exists: {request.robotCode}")
+            session.add(self._robot_config_row(config))
+            robot_exists = session.scalar(
+                select(RobotInstanceRecord.id).where(
+                    RobotInstanceRecord.workspace_id == self.workspace_id,
+                    RobotInstanceRecord.robot_code == request.robotCode,
+                )
+            )
+            if robot_exists is None:
+                session.add(
+                    self._robot_row(
+                        RobotState(
+                            robotId=request.robotCode,
+                            robotType=request.robotType,
+                            state="Idle" if request.enabled else "Disabled",
+                            x=request.initialPose.x,
+                            y=request.initialPose.y,
+                            progress=0,
+                            currentAction="Waiting for command",
+                            updatedAt=iso_datetime(now),
+                        )
+                    )
+                )
+            self._add_audit(session, "robot.config.created", "robot", request.robotCode, after=config.model_dump())
+        return config
+
+    def update_robot_config(self, robot_code: str, request: RobotConfigUpdate) -> RobotConfig | None:
+        now = now_utc()
+        with self.database.session() as session:
+            row = session.scalar(
+                select(RobotConfigRecord).where(
+                    RobotConfigRecord.workspace_id == self.workspace_id,
+                    RobotConfigRecord.robot_code == robot_code,
+                )
+            )
+            if row is None:
+                return None
+            before = self._robot_config_model(row).model_dump()
+            patch = request.model_dump(exclude_unset=True)
+            for key, value in patch.items():
+                if key == "robotName":
+                    row.robot_name = value
+                elif key == "robotType":
+                    row.robot_type = value
+                elif key == "status":
+                    row.status = value
+                elif key == "enabled":
+                    row.enabled = value
+                elif key == "capabilities":
+                    row.capabilities_json = value
+                elif key == "actionSetId":
+                    row.action_set_id = value
+                elif key == "mapId":
+                    row.map_id = value
+                elif key == "initialPose":
+                    row.initial_pose_json = value
+                elif key == "metadata":
+                    row.metadata_json = value
+            row.updated_at = now
+            updated = self._robot_config_model(row)
+            self._add_audit(session, "robot.config.updated", "robot", robot_code, before=before, after=updated.model_dump())
+            return updated
+
+    def delete_robot_config(self, robot_code: str) -> RobotConfig | None:
+        return self.update_robot_config(robot_code, RobotConfigUpdate(status="deleted", enabled=False))
+
+    def list_executors(self, robot_code: str | None = None) -> list[ExecutorInstance]:
+        query = select(ExecutorInstanceRecord).where(ExecutorInstanceRecord.workspace_id == self.workspace_id)
+        if robot_code:
+            query = query.where(ExecutorInstanceRecord.robot_code == robot_code)
+        with self.database.session() as session:
+            rows = session.scalars(query.order_by(ExecutorInstanceRecord.robot_code, ExecutorInstanceRecord.updated_at.desc())).all()
+            return [self._executor_model(row) for row in rows]
+
+    def get_executor(self, executor_id: str) -> ExecutorInstance | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(ExecutorInstanceRecord).where(
+                    ExecutorInstanceRecord.workspace_id == self.workspace_id,
+                    ExecutorInstanceRecord.executor_id == executor_id,
+                )
+            )
+            return self._executor_model(row) if row else None
+
+    def create_executor(self, request: ExecutorInstanceCreate) -> ExecutorInstance:
+        now = now_utc()
+        executor = ExecutorInstance(
+            executorId=new_id("exec"),
+            robotCode=request.robotCode,
+            executorType=request.executorType,
+            status="active" if request.executorType == "virtual" else "binding",
+            mqttClientId=request.mqttClientId or f"{request.executorType}-{request.robotCode}",
+            containerName=request.containerName or (f"virtual-robot-runner-{request.robotCode}" if request.executorType == "virtual" else None),
+            gatewayEndpoint=request.gatewayEndpoint,
+            startedAt=iso_datetime(now),
+            updatedAt=iso_datetime(now),
+            metadata={
+                "ROBOT_CODE": request.robotCode,
+                "ROBOT_TYPE": request.robotType,
+                "START_X": request.startPose.x if request.startPose else None,
+                "START_Y": request.startPose.y if request.startPose else None,
+                **request.metadata,
+            },
+        )
+        with self.database.session() as session:
+            active = session.scalar(
+                select(ExecutorInstanceRecord).where(
+                    ExecutorInstanceRecord.workspace_id == self.workspace_id,
+                    ExecutorInstanceRecord.robot_code == request.robotCode,
+                    ExecutorInstanceRecord.status == "active",
+                )
+            )
+            if active is not None:
+                raise ValueError(f"robot {request.robotCode} already has active executor {active.executor_id}")
+            session.add(self._executor_row(executor))
+            config = session.scalar(
+                select(RobotConfigRecord).where(
+                    RobotConfigRecord.workspace_id == self.workspace_id,
+                    RobotConfigRecord.robot_code == request.robotCode,
+                )
+            )
+            if config:
+                config.executor_id = executor.executorId
+                config.updated_at = now
+            self._add_audit(session, "executor.created", "executor", executor.executorId, after=executor.model_dump())
+        return executor
+
+    def transition_executor(self, executor_id: str, status: str) -> ExecutorInstance | None:
+        now = now_utc()
+        with self.database.session() as session:
+            row = session.scalar(
+                select(ExecutorInstanceRecord).where(
+                    ExecutorInstanceRecord.workspace_id == self.workspace_id,
+                    ExecutorInstanceRecord.executor_id == executor_id,
+                )
+            )
+            if row is None:
+                return None
+            before = self._executor_model(row).model_dump()
+            row.status = status
+            row.updated_at = now
+            if status == "active" and row.started_at is None:
+                row.started_at = now
+            updated = self._executor_model(row)
+            self._add_audit(session, f"executor.{status}", "executor", executor_id, before=before, after=updated.model_dump())
+            return updated
+
+    def executor_logs(self, executor_id: str, limit: int = 100) -> list[MessageRecord]:
+        executor = self.get_executor(executor_id)
+        if executor is None:
+            return []
+        return self.query_messages(limit=limit, robot_code=executor.robotCode)
 
     def create_export(self, export_type: str) -> tuple[str, str]:
         export_id = new_id("export")
@@ -909,7 +1296,7 @@ class DatabaseStore(JsonStore):
         now = now_utc()
         action_id = protocol_id("ACTION")
         robot_code = request.robotCode or self._default_robot_code()
-        params = validate_action_params(request.command, request.params)
+        params = self.resolve_action_params(request.command, request.params)
         with self.database.session() as session:
             robot_exists = session.scalar(
                 select(func.count()).select_from(RobotInstanceRecord).where(
@@ -1764,6 +2151,118 @@ class DatabaseStore(JsonStore):
     def _default_robot_code(self) -> str:
         robots = self.robots()
         return robots[0].robotId if robots else "robot-001"
+
+    def _target_row(self, target: TargetRegistryItem) -> TargetRegistryRecord:
+        return TargetRegistryRecord(
+            workspace_id=self.workspace_id,
+            target_id=target.targetId,
+            target_type=target.targetType,
+            display_name=target.displayName,
+            map_id=target.mapId,
+            pose_json=target.pose.model_dump() if target.pose else None,
+            geometry_ref=target.geometryRef,
+            metadata_json=target.metadata,
+            status=target.status,
+            version=target.version,
+            created_at=parse_datetime(target.createdAt),
+            updated_at=parse_datetime(target.updatedAt),
+        )
+
+    @staticmethod
+    def _target_model(row: TargetRegistryRecord) -> TargetRegistryItem:
+        return TargetRegistryItem(
+            targetId=row.target_id,
+            targetType=row.target_type,
+            displayName=row.display_name,
+            mapId=row.map_id,
+            pose=row.pose_json,
+            geometryRef=row.geometry_ref,
+            metadata=row.metadata_json,
+            status=row.status,
+            version=row.version,
+            createdAt=iso_datetime(row.created_at),
+            updatedAt=iso_datetime(row.updated_at),
+        )
+
+    def _robot_config_row(self, config: RobotConfig) -> RobotConfigRecord:
+        return RobotConfigRecord(
+            workspace_id=self.workspace_id,
+            robot_code=config.robotCode,
+            robot_name=config.robotName,
+            robot_type=config.robotType,
+            status=config.status,
+            enabled=config.enabled,
+            capabilities_json=config.capabilities,
+            action_set_id=config.actionSetId,
+            map_id=config.mapId,
+            initial_pose_json=config.initialPose.model_dump(),
+            executor_id=config.executorId,
+            metadata_json=config.metadata,
+            created_at=parse_datetime(config.createdAt),
+            updated_at=parse_datetime(config.updatedAt),
+        )
+
+    def _robot_config_model(self, row: RobotConfigRecord) -> RobotConfig:
+        executor_status = None
+        if row.executor_id:
+            with self.database.session() as session:
+                executor = session.scalar(
+                    select(ExecutorInstanceRecord).where(
+                        ExecutorInstanceRecord.workspace_id == self.workspace_id,
+                        ExecutorInstanceRecord.executor_id == row.executor_id,
+                    )
+                )
+                executor_status = executor.status if executor else None
+        return RobotConfig(
+            robotCode=row.robot_code,
+            robotName=row.robot_name,
+            robotType=row.robot_type,
+            status=row.status,
+            enabled=row.enabled,
+            capabilities=row.capabilities_json,
+            actionSetId=row.action_set_id,
+            mapId=row.map_id,
+            initialPose=row.initial_pose_json,
+            createMode="config_only",
+            executorEndpoint=None,
+            metadata=row.metadata_json,
+            executorId=row.executor_id,
+            executorStatus=executor_status,
+            createdAt=iso_datetime(row.created_at),
+            updatedAt=iso_datetime(row.updated_at),
+        )
+
+    def _executor_row(self, executor: ExecutorInstance) -> ExecutorInstanceRecord:
+        return ExecutorInstanceRecord(
+            workspace_id=self.workspace_id,
+            executor_id=executor.executorId,
+            robot_code=executor.robotCode,
+            executor_type=executor.executorType,
+            status=executor.status,
+            mqtt_client_id=executor.mqttClientId,
+            last_heartbeat_at=parse_datetime(executor.lastHeartbeatAt) if executor.lastHeartbeatAt else None,
+            container_name=executor.containerName,
+            gateway_endpoint=executor.gatewayEndpoint,
+            started_at=parse_datetime(executor.startedAt) if executor.startedAt else None,
+            metadata_json=executor.metadata,
+            updated_at=parse_datetime(executor.updatedAt),
+        )
+
+    @staticmethod
+    def _executor_model(row: ExecutorInstanceRecord) -> ExecutorInstance:
+        return ExecutorInstance(
+            executorId=row.executor_id,
+            robotCode=row.robot_code,
+            executorType=row.executor_type,
+            status=row.status,
+            mqttClientId=row.mqtt_client_id,
+            lastHeartbeatAt=iso_datetime(row.last_heartbeat_at) if row.last_heartbeat_at else None,
+            containerName=row.container_name,
+            gatewayEndpoint=row.gateway_endpoint,
+            startedAt=iso_datetime(row.started_at) if row.started_at else None,
+            updatedAt=iso_datetime(row.updated_at),
+            metadata=row.metadata_json,
+        )
 
     def _add_observation(
         self,
