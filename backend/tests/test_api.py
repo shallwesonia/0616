@@ -249,6 +249,7 @@ def test_action_command_specs_expose_standard_params():
         commands = {item["command"]: item for item in payload}
         assert set(commands) == set(action_command_names())
         assert {"x", "y", "z", "yaw", "speed", "tolerance"}.issubset(commands["goto_pose"]["fields"])
+        assert commands["goto_pose"]["fields"]["pathGroupId"]["type"] == "pathGroup"
         assert commands["where"]["fields"]["queryMode"]["options"] == ["pose", "state", "full"]
         assert commands["stop"]["fields"]["stopScope"]["options"] == ["current_action", "task", "robot"]
         assert commands["pick"]["defaults"]["targetType"] == "cargo"
@@ -302,6 +303,44 @@ def test_target_registry_validates_action_targets(tmp_path, monkeypatch):
         )
         assert invalid.status_code == 400
         assert "targetId" in invalid.json()["detail"]
+
+
+def test_action_rejects_robot_using_unassigned_path_group(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-path-group-action.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000092"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        run_response = client.post("/api/v1/simulation-runs", json={"scenarioId": "default-site-a"})
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+
+        rejected = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"x": 500, "y": 320, "pathGroupId": "path-group-b"},
+            },
+        )
+        assert rejected.status_code == 400
+        assert "not allowed" in rejected.json()["detail"]
+
+        accepted = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"x": 500, "y": 320, "pathGroupId": "path-group-a"},
+            },
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["params"]["pathGroupId"] == "path-group-a"
 
 
 def test_robot_config_and_executor_management(tmp_path, monkeypatch):
@@ -389,6 +428,173 @@ def test_mqtt_contract_uses_dog_command_result_topics():
         assert payload["topicPattern"] == "factory/dogs/{robotCode}/{channel}"
         assert payload["command"]["topic"] == "factory/dogs/{robotCode}/command"
         assert payload["result"]["topic"] == "factory/dogs/{robotCode}/result"
+
+
+def test_scene_world_state_hub_compatibility_api(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-compat.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000093"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+        scene_response = client.post(
+            "/api/v1/scenes",
+            json={"scene_name": "hub-demo-scene", "description": "Hub compatibility", "map_config": {"mapId": "site-a"}},
+        )
+        assert scene_response.status_code == 200
+        scene = scene_response.json()
+        scene_id = scene["scene_id"]
+        assert client.get(f"/api/v1/scenes/{scene_id}").status_code == 200
+
+        entity_response = client.post(
+            "/api/v1/entities",
+            json={
+                "scene_id": scene_id,
+                "entity_name": "hub-robot-001",
+                "entity_type": "robot",
+                "properties": {"robotCode": "robot-001"},
+            },
+        )
+        assert entity_response.status_code == 200
+        entity = entity_response.json()
+        entities = client.get("/api/v1/entities", params={"scene_id": scene_id, "entity_type": "robot"})
+        assert entities.status_code == 200
+        assert any(item["entity_id"] == entity["entity_id"] for item in entities.json())
+
+        run_response = client.post(
+            "/api/v1/runs",
+            json={"run_id": "hub-run-001", "scene_id": scene_id, "status": "running", "phase": "observing"},
+        )
+        assert run_response.status_code == 200
+        assert run_response.json()["run_id"] == "hub-run-001"
+        assert client.get("/api/v1/runs/hub-run-001").status_code == 200
+
+        task_response = client.post(
+            "/api/v1/tasks",
+            json={
+                "run_id": "hub-run-001",
+                "scene_id": scene_id,
+                "task_name": "hub transport",
+                "task_type": "transport",
+                "definition": {"command": "goto_pose", "target": {"x": 500, "y": 320}},
+            },
+        )
+        assert task_response.status_code == 200
+        task = task_response.json()
+        assert task["task_id"]
+        assert task["task_name"] == "hub transport"
+        active_plan_id = task["activePlan"]["planId"]
+
+        plan_response = client.post(
+            "/api/v1/plans",
+            json={"task_id": task["task_id"], "version": 2, "plan_data": {"steps": [{"step_key": "move"}]}},
+        )
+        assert plan_response.status_code == 200
+        plan = plan_response.json()
+        assert client.get(f"/api/v1/plans/{plan['plan_id']}").status_code == 200
+
+        action_response = client.post(
+            "/api/v1/actions",
+            json={
+                "task_id": task["task_id"],
+                "plan_id": active_plan_id,
+                "entity_id": "robot-001",
+                "action_type": "move",
+                "parameters": {"target_pose": [500, 320, 0, 0], "pathGroupId": "path-group-a"},
+            },
+        )
+        assert action_response.status_code == 200
+        action = action_response.json()
+        assert action["action_type"] == "move"
+        assert action["command"] == "goto_pose"
+
+        plan_status = client.post(
+            f"/api/v1/plans/{active_plan_id}/status",
+            json={
+                "run_id": "hub-run-001",
+                "scene_id": scene_id,
+                "task_id": task["task_id"],
+                "plan_id": active_plan_id,
+                "action_id": action["action_id"],
+                "plan_status": "active",
+            },
+        )
+        assert plan_status.status_code == 200
+
+        action_status = client.post(
+            f"/api/v1/actions/{action['action_id']}/status",
+            json={
+                "run_id": "hub-run-001",
+                "scene_id": scene_id,
+                "task_id": task["task_id"],
+                "plan_id": active_plan_id,
+                "action_id": action["action_id"],
+                "action_status": "executing",
+            },
+        )
+        assert action_status.status_code == 200
+
+        observation = client.post(
+            "/api/v1/observations",
+            json={
+                "message_id": "hub-observation-001",
+                "scene_id": scene_id,
+                "run_id": "hub-run-001",
+                "task_id": task["task_id"],
+                "action_id": action["action_id"],
+                "trace_id": action["traceId"],
+                "observation_type": "where.result",
+                "observed_at": "2026-06-29T08:00:00+00:00",
+                "entity_id": "robot-001",
+                "data": {"x": 500, "y": 320},
+            },
+        )
+        assert observation.status_code == 200
+        assert observation.json()["message_id"] == "hub-observation-001"
+
+        current_state = client.get("/api/v1/current-state", params={"scene_id": scene_id, "run_id": "hub-run-001"})
+        assert current_state.status_code == 200
+        assert current_state.json()["run_id"] == "hub-run-001"
+
+        executor_result = client.post(
+            "/api/v1/executor-results",
+            json={
+                "message_id": "hub-executor-result-001",
+                "scene_id": scene_id,
+                "success": True,
+                "result_code": "ok",
+                "executed_at": "2026-06-29T08:00:01+00:00",
+                "entity_id": "robot-001",
+                "action_id": action["action_id"],
+                "command_id": action["commandId"],
+            },
+        )
+        assert executor_result.status_code == 200
+        results = client.get("/api/v1/executor-results", params={"entity_id": "robot-001"})
+        assert results.status_code == 200
+        assert any(item["message_id"] == "hub-executor-result-001" for item in results.json())
+
+        trace_response = client.post("/api/v1/traces", json={"trace_type": "shared", "scene_id": scene_id, "run_id": "hub-run-001"})
+        assert trace_response.status_code == 200
+        trace_id = trace_response.json()["trace_id"]
+        assert client.get(f"/api/v1/traces/{trace_id}").status_code == 200
+        trace_event = client.post(f"/api/v1/traces/{trace_id}/events", json={"event_type": "demo", "event_data": {"ok": True}})
+        assert trace_event.status_code == 200
+        assert client.get(f"/api/v1/traces/{trace_id}/events").json()[0]["event_type"] == "demo"
+
+        snapshot = client.post("/api/v1/snapshots", json={"scene_id": scene_id, "run_id": "hub-run-001", "label": "manual"})
+        assert snapshot.status_code == 200
+        snapshot_id = snapshot.json()["snapshot_id"]
+        assert client.get(f"/api/v1/snapshots/{snapshot_id}").status_code == 200
+        assert client.get("/api/v1/snapshots", params={"scene_id": scene_id}).status_code == 200
+
+        messages = client.post("/api/v1/messages/query", json={"source": "hub-compat", "limit": 10})
+        assert messages.status_code == 200
+        assert messages.json()["count"] >= 1
 
 
 def test_messages_can_be_filtered_by_dog_result_fields():

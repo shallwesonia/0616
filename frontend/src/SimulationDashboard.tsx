@@ -72,6 +72,7 @@ import type {
   MapObject,
   MessageRecord,
   Observation,
+  PathGroup,
   RobotConfig,
   RobotState,
   RunMessageMetrics,
@@ -1051,6 +1052,8 @@ export function SimulationDashboard() {
                       spec={selectedCommandSpec}
                       values={actionParams}
                       targetOptions={targetOptions}
+                      pathGroups={selectedScenario?.map ? normalizedPathGroups(selectedScenario.map) : []}
+                      selectedRobotCode={effectiveRobotCode}
                       onChange={(name, value) => setActionParams((current) => ({ ...current, [name]: value }))}
                     />
                     <NumberInput label="超时 ms" value={timeoutMs} onChange={(value) => setTimeoutMs(Math.max(1000, value))} />
@@ -1352,6 +1355,7 @@ function ReadOnlyMap({
       </text>
     );
   }
+  const pathGroups = normalizedPathGroups(map);
   return (
     <div className="relative h-full min-h-[660px] overflow-hidden rounded-lg border border-neutral-200 bg-white">
       <svg viewBox={`0 0 ${map.width} ${map.height}`} className="h-full min-h-[660px] w-full">
@@ -1364,14 +1368,26 @@ function ReadOnlyMap({
           <line x1={0} y1={0} x2={0} y2={map.height} />
         </g>
         <g>{axisLabels}</g>
-        <g stroke="#111827" strokeOpacity="0.32" strokeWidth="3">
+        <g>
           {map.pathEdges.map((edge) => {
             const from = map.objects.find((item) => item.id === edge.from);
             const to = map.objects.find((item) => item.id === edge.to);
             if (!from || !to) {
               return null;
             }
-            return <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+            const group = pathGroups.find((item) => item.id === edge.pathGroupId || item.edgeIds.includes(edge.id));
+            return (
+              <line
+                key={edge.id}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke={group?.color ?? "#111827"}
+                strokeOpacity="0.46"
+                strokeWidth="4"
+              />
+            );
           })}
         </g>
         {map.objects.map((item) => (
@@ -1409,9 +1425,39 @@ function ReadOnlyMap({
         <span>{map.name}</span>
         <span>{map.width} x {map.height} {map.unit}</span>
         <span>异常 {activeEvents.length}</span>
+        {pathGroups.map((group) => (
+          <span key={group.id} className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.color }} />
+            {group.name}
+          </span>
+        ))}
       </div>
     </div>
   );
+}
+
+function normalizedPathGroups(map: SiteMap): PathGroup[] {
+  if (!map.pathGroups?.length) {
+    return [
+      {
+        id: "default-path-group",
+        name: "默认路径",
+        edgeIds: map.pathEdges.map((edge) => edge.id),
+        allowedRobotCodes: [],
+        color: "#111827",
+        status: "active",
+        priority: 5,
+        metadata: { source: "legacy" }
+      }
+    ];
+  }
+  return map.pathGroups.map((group, index) => ({
+    ...group,
+    edgeIds: group.edgeIds ?? [],
+    allowedRobotCodes: group.allowedRobotCodes ?? [],
+    color: group.color || ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#d97706"][index % 6],
+    metadata: group.metadata ?? {}
+  }));
 }
 
 function ReadOnlyShape({ item }: { item: MapObject }) {
@@ -1468,6 +1514,15 @@ function eventPosition(map: SiteMap, robots: RobotState[], event: Record<string,
   if (edge) {
     const from = map.objects.find((item) => item.id === edge.from);
     const to = map.objects.find((item) => item.id === edge.to);
+    if (from && to) {
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    }
+  }
+  const group = normalizedPathGroups(map).find((item) => item.id === targetId);
+  const groupEdge = group ? map.pathEdges.find((item) => item.pathGroupId === group.id || group.edgeIds.includes(item.id)) : null;
+  if (groupEdge) {
+    const from = map.objects.find((item) => item.id === groupEdge.from);
+    const to = map.objects.find((item) => item.id === groupEdge.to);
     if (from && to) {
       return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
     }
@@ -1578,11 +1633,15 @@ function ActionParamForm({
   spec,
   values,
   targetOptions,
+  pathGroups,
+  selectedRobotCode,
   onChange
 }: {
   spec: ActionCommandSpec | null;
   values: Record<string, string | number>;
   targetOptions: TargetRegistryItem[];
+  pathGroups: PathGroup[];
+  selectedRobotCode: string;
   onChange: (name: string, value: string | number) => void;
 }) {
   if (!spec) {
@@ -1622,6 +1681,28 @@ function ActionParamForm({
                   {options.map((target) => (
                     <option key={target.targetId} value={target.targetId}>
                       {target.displayName} / {target.targetId}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          if (field.type === "pathGroup") {
+            const options = pathGroups.filter(
+              (group) => group.allowedRobotCodes.length === 0 || group.allowedRobotCodes.includes(selectedRobotCode)
+            );
+            return (
+              <label key={name} className="block text-xs font-medium text-neutral-500">
+                {field.label ?? name}
+                <select
+                  className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+                  value={String(value)}
+                  onChange={(event) => onChange(name, event.currentTarget.value)}
+                >
+                  <option value="">不指定路径组</option>
+                  {options.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name} / {group.id}
                     </option>
                   ))}
                 </select>

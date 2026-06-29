@@ -18,6 +18,7 @@ TargetType = Literal[
     "zone",
     "pathNode",
     "pathEdge",
+    "pathGroup",
 ]
 TargetStatus = Literal["active", "inactive", "blocked", "deleted"]
 RobotConfigStatus = Literal["created", "enabled", "disabled", "deleted"]
@@ -46,6 +47,7 @@ ACTION_TARGET_TYPE_OPTIONS = [
     "zone",
     "pathNode",
     "pathEdge",
+    "pathGroup",
 ]
 
 ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
@@ -66,6 +68,18 @@ ACTION_COMMAND_SPECS: dict[str, dict[str, Any]] = {
                 "required": False,
                 "label": "目标类型",
                 "options": ACTION_TARGET_TYPE_OPTIONS,
+            },
+            "pathGroupId": {
+                "type": "pathGroup",
+                "required": False,
+                "label": "路径组",
+                "description": "指定机器人使用的分段路径组。",
+            },
+            "routingMode": {
+                "type": "select",
+                "required": False,
+                "label": "路径模式",
+                "options": ["fixed_path", "auto_route", "nearest_available"],
             },
             "x": {"type": "number", "required": False, "label": "目标 X"},
             "y": {"type": "number", "required": False, "label": "目标 Y"},
@@ -296,8 +310,23 @@ class PathEdge(BaseModel):
     to: str
     direction: Literal["one_way", "two_way"] = "two_way"
     capacity: int = 1
+    pathGroupId: str | None = None
+    sequence: int | None = None
+    speedLimit: float | None = None
+    allowedRobotTypes: list[str] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
+
+
+class PathGroup(BaseModel):
+    id: str
+    name: str
+    edgeIds: list[str] = Field(default_factory=list)
+    allowedRobotCodes: list[str] = Field(default_factory=list)
+    color: str = "#111827"
+    status: Literal["active", "disabled", "blocked"] = "active"
+    priority: int = 5
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SiteMap(BaseModel):
@@ -310,6 +339,7 @@ class SiteMap(BaseModel):
     configVersion: str
     objects: list[MapObject]
     pathEdges: list[PathEdge] = []
+    pathGroups: list[PathGroup] = []
 
 
 class MapDraftCreate(BaseModel):
@@ -555,8 +585,11 @@ class ScenarioValidationResponse(BaseModel):
 
 
 class SimulationRunCreate(BaseModel):
+    runId: str | None = Field(default=None, alias="run_id")
     scenarioId: str = "default-site-a"
     name: str | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class SimulationRun(BaseModel):

@@ -40,6 +40,37 @@
 
 完整字段以 `docs/contracts/openapi.json` 为准。
 
+### Scene / World State Hub 兼容 API
+
+为对齐原文 Hub “当前外部可调用接口与实现状态”，平台新增一层兼容 API。兼容层不替换现有平台 API，而是在 `/api/v1` 下提供 Hub 风格对象、字段和查询路径，便于外部系统按 Hub 原文契约接入。
+
+兼容入口：
+
+| 分类 | Hub 对齐接口 |
+|---|---|
+| Health | `GET /health` |
+| Run | `POST /api/v1/runs`、`GET /api/v1/runs/{run_id}` |
+| Scene | `POST /api/v1/scenes`、`GET /api/v1/scenes`、`GET /api/v1/scenes/{scene_id}` |
+| Entity | `POST /api/v1/entities`、`GET /api/v1/entities`、`GET /api/v1/entities/{entity_id}` |
+| Observation / CurrentState | `POST /api/v1/observations`、`GET /api/v1/current-state` |
+| ExecutorResult | `POST /api/v1/executor-results`、`GET /api/v1/executor-results` |
+| Task | `POST /api/v1/tasks`、`GET /api/v1/tasks/{task_id}` |
+| Plan | `POST /api/v1/plans`、`GET /api/v1/plans/{plan_id}`、`POST /api/v1/plans/{plan_id}/status` |
+| Action | `POST /api/v1/actions`、`GET /api/v1/actions/{action_id}`、`POST /api/v1/actions/{action_id}/status` |
+| Trace | `POST /api/v1/traces`、`GET /api/v1/traces/{trace_id}`、`POST /api/v1/traces/{trace_id}/events`、`GET /api/v1/traces/{trace_id}/events` |
+| Snapshot | `POST /api/v1/snapshots`、`GET /api/v1/snapshots/{snapshot_id}`、`GET /api/v1/snapshots` |
+| Message Query | `POST /api/v1/messages/query` |
+
+兼容规则：
+
+- `POST /api/v1/actions` 同时兼容平台原 Action 请求体和 Hub Action 请求体；当请求体包含 `action_type`、`task_id`、`plan_id` 时按 Hub Action 处理。
+- `action_type=move` 映射为平台动作 `goto_pose`；`parameters.target_pose=[x,y,z,yaw]` 会转换为 `x/y/z/yaw`。
+- Hub Action 仍通过消息总成发布 Command，不直接操作执行体。
+- Hub Action 的 `entity_id` 会解析到 `robotCode`；若传入机器人编码本身，则直接使用该机器人。
+- 当前平台已有事实源的对象会映射复用：Scenario 映射 Scene，Target/Robot 映射 Entity，SimulationRun/Task/Action/CurrentState/Observation 复用原模型。
+- 当前没有独立原生表的 Hub 兼容对象暂存到 MessageRecord：`scene`、`entity`、`plan`、`executor_result`、`trace`、`trace_event`、`snapshot`、`plan_status`、`action_status`。消息类型统一为 `hub.<object_type>`，来源为 `hub-compat`。
+- 兼容层为外部调用契约，不改变 MQTT 机器人控制契约；设备侧仍只依赖 `factory/dogs/{robotCode}/command` 和 `factory/dogs/{robotCode}/result`。
+
 ## MQTT / AsyncAPI 基线
 
 Topic：
@@ -72,6 +103,24 @@ Topic：
 - Executor Instance：`executor_instances`
 - Simulation Run / Task / Plan / Action / Observation / CurrentState / Snapshot / Trace
 - AgentDecision：当前通过 `agentDecision` 消息和 Trace 引用固化，后续可升级为独立表。
+
+### 路径组兼容扩展
+
+本次在不改变既有 API 路径的前提下，新增二维地图分段路径组能力：
+
+- `SiteMap.pathGroups[]`：描述分段路径组。
+- `PathEdge.pathGroupId`：标识路径边所属路径组。
+- `PathEdge.sequence`：标识路径边在路径组内的顺序。
+- `Target Registry targetType=pathGroup`：路径组可被 Trace、Message、Observation 和异常影响范围引用。
+- `goto_pose.params.pathGroupId`：可选路径组参数，后端按 `robotCode` 校验机器人是否允许使用该路径组。
+- 旧地图若没有 `pathGroups`，平台读取时会兼容生成路径组；多条旧路径边按顺序拆分为多个路径组，前 3 组默认绑定 `robot-001`、`robot-002`、`robot-003`。
+
+前端要求：
+
+- 地图编辑页必须提供路径组选择、新建、状态、颜色和机器人绑定入口。
+- 新增路径点时只连接到当前选中路径组，不再连接到全局最后一个路径点。
+- 仿真驾驶舱中 `goto_pose` 的 `pathGroupId` 必须以下拉选择方式填写，按当前机器人过滤可用路径组。
+- 只读地图按路径组颜色展示路径边，异常事件可通过 `pathGroupId` 定位到路径组。
 
 ## Frontend Smoke Test
 

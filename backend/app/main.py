@@ -4,8 +4,9 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -70,6 +71,14 @@ from .schemas import (
 )
 from .store import EXPORT_DIR
 from .store_factory import create_store
+from .hub_compat import (
+    HubActionCreate,
+    action_to_hub_response,
+    create_hub_action,
+    find_hub_object,
+    register_hub_compat_routes,
+    task_to_hub_response,
+)
 
 
 store = create_store()
@@ -516,6 +525,8 @@ def _issue_command(command: CommandCreate) -> CommandResponse:
             params = store.resolve_action_params(command_name, _command_params(command))
         else:
             params = validate_action_params(command_name, _command_params(command))
+        if hasattr(store, "validate_robot_path_group"):
+            store.validate_robot_path_group(robot_code, params.get("pathGroupId"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -850,12 +861,12 @@ def list_simulation_run_tasks(run_id: str) -> list[SimulationTask]:
     return store.list_run_tasks(run_id)
 
 
-@app.get("/api/v1/tasks/{task_id}", response_model=SimulationTask)
-def get_task(task_id: str) -> SimulationTask:
+@app.get("/api/v1/tasks/{task_id}")
+def get_task(task_id: str) -> dict[str, Any]:
     task = store.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    return task
+    return task_to_hub_response(task)
 
 
 @app.get("/api/v1/tasks/{task_id}/plans")
@@ -871,10 +882,18 @@ def get_task_trace(task_id: str) -> TraceResponse:
     return trace
 
 
-@app.post("/api/v1/actions", response_model=SimulationAction)
-def create_action(request: ActionCreate) -> SimulationAction:
+@app.post("/api/v1/actions")
+def create_action(request: ActionCreate | HubActionCreate = Body(...)) -> dict[str, Any] | SimulationAction:
+    if isinstance(request, HubActionCreate):
+        return create_hub_action(store, request.model_dump(), _issue_command)
+    action_request = request
+    if action_request.robotCode and hasattr(store, "validate_robot_path_group"):
+        try:
+            store.validate_robot_path_group(action_request.robotCode, action_request.params.get("pathGroupId"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        action = store.create_action(request)
+        action = store.create_action(action_request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if action is None:
@@ -886,7 +905,7 @@ def create_action(request: ActionCreate) -> SimulationAction:
             params=action.params,
             timeoutMs=action.timeoutMs,
             issuedBy="agent",
-            operatorId=request.operatorId,
+            operatorId=action_request.operatorId,
             taskId=action.taskId,
             traceId=action.traceId,
         )
@@ -902,17 +921,17 @@ def create_action(request: ActionCreate) -> SimulationAction:
     return issued
 
 
-@app.get("/api/v1/actions", response_model=list[SimulationAction])
-def list_actions(runId: str | None = None, taskId: str | None = None, limit: int = 100) -> list[SimulationAction]:
-    return store.list_actions(run_id=runId, task_id=taskId, limit=limit)
+@app.get("/api/v1/actions")
+def list_actions(runId: str | None = None, taskId: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    return [action_to_hub_response(action) for action in store.list_actions(run_id=runId, task_id=taskId, limit=limit)]
 
 
-@app.get("/api/v1/actions/{action_id}", response_model=SimulationAction)
-def get_action(action_id: str) -> SimulationAction:
+@app.get("/api/v1/actions/{action_id}")
+def get_action(action_id: str) -> dict[str, Any]:
     action = store.get_action(action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="action not found")
-    return action
+    return action_to_hub_response(action)
 
 
 @app.get("/api/v1/actions/{action_id}/trace", response_model=TraceResponse)
@@ -992,6 +1011,9 @@ def schedule_simulation_run(run_id: str, request: RuleScheduleRequest) -> RuleSc
     reason = f"rule scheduler selected {selected_robot} by {request.strategy}"
     if request.autoIssue:
         try:
+            if hasattr(store, "validate_robot_path_group"):
+                step_params = step.params or step.target
+                store.validate_robot_path_group(selected_robot, step_params.get("pathGroupId"))
             created = store.create_action(
                 ActionCreate(
                     runId=run_id,
@@ -1162,17 +1184,27 @@ def list_simulation_snapshots(run_id: str) -> list[Snapshot]:
     return store.list_snapshots(run_id)
 
 
-@app.get("/api/v1/traces/{trace_id}", response_model=TraceResponse)
-def get_trace(trace_id: str) -> TraceResponse:
+@app.get("/api/v1/traces/{trace_id}")
+def get_trace(trace_id: str) -> dict[str, Any] | TraceResponse:
     trace = store.get_trace(trace_id)
     if trace.status == "NotFound":
-        raise HTTPException(status_code=404, detail="trace not found")
+        hub_trace = find_hub_object(store, "trace", trace_id)
+        if hub_trace is None:
+            raise HTTPException(status_code=404, detail="trace not found")
+        return {
+            **hub_trace,
+            "traceId": hub_trace.get("trace_id") or trace_id,
+            "status": "Open",
+            "spans": [],
+        }
     return trace
 
 
 @app.get("/api/v1/traces/{trace_id}/spans", response_model=list)
 def get_trace_spans(trace_id: str) -> list:
     trace = get_trace(trace_id)
+    if isinstance(trace, dict):
+        return trace.get("spans", [])
     return [span.model_dump() for span in trace.spans]
 
 
@@ -1217,6 +1249,9 @@ async def simulation_run_socket(websocket: WebSocket, workspace_id: str, run_id:
             await asyncio.sleep(2)
     except WebSocketDisconnect:
         return
+
+
+register_hub_compat_routes(app, lambda: store)
 
 
 @app.websocket("/ws/v1/sessions/{session_id}")

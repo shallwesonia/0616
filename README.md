@@ -45,6 +45,8 @@ Docker 环境默认使用 PostgreSQL 主存储，容器启动时先自动执行 
 Redis 用于最新机器人状态、最近消息缓冲和 Workspace 事件发布。Redis 是可重建辅助缓存，故障时 API 与 WebSocket 回退 PostgreSQL。数据库备份写入 `data/backups`，标准流程见 `.codex/docs/数据库备份恢复与初始化_20260622.md`。
 
 Docker Compose 默认启动 3 个独立虚拟机器狗执行体：`robot-001`、`robot-002`、`robot-003`。三者共用当前 Workspace MQTT Broker，但使用各自的 `ROBOT_CODE` 和 MQTT clientId，平台按 `robotCode` 聚合状态和下发 Action。
+前端地图支持分段路径组：路径边可按 `pathGroupId` 分组并绑定机器人，`goto_pose` 可选择路径组，后端会按 `robotCode` 校验路径组权限。
+如果访问 `http://{PUBLIC_HOST}:5173` 看不到最新前端变更，需要重新执行 `docker compose up -d --build frontend platform-api`，因为局域网入口默认访问的是 Docker Nginx 静态资源，不是本地 `frontend/dist`。
 
 本机访问：
 
@@ -71,6 +73,7 @@ Docker Compose 默认启动 3 个独立虚拟机器狗执行体：`robot-001`、
 - 平台 API 的地图、草稿、机器人状态、消息、导出任务和审计记录由 PostgreSQL 持久化，并按 `WORKSPACE_ID` 隔离。
 - 虚拟机器狗执行体是独立服务，只依赖 MQTT 契约；当前默认部署 3 个执行体实例，后续可逐台替换为真实机器狗网关。
 - MQTT 对外接口按机器狗 command/result 标准：`factory/dogs/{robotCode}/command`、`factory/dogs/{robotCode}/result`。
+- 外部 Hub 兼容 REST 入口已对齐 Scene / World State Hub 原文接口：`GET /health`、`POST /api/v1/runs`、`POST /api/v1/scenes`、`POST /api/v1/entities`、`POST /api/v1/observations`、`POST /api/v1/executor-results`、`POST /api/v1/messages/query` 等，完整契约见 `.codex/docs/MVP基线接口契约_v0.3.0_20260624.md` 和 `docs/contracts/openapi.json`。
 - 当前动作集支持 `goto_pose`、`stop`、`where`、`pick`、`place`、`load`、`unload`、`inspect`、`charge`、`wait`。
 - 动作耗时使用动作配置区间随机生成，默认 `goto_pose` 为 30-35 秒。
 

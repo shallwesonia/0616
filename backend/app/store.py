@@ -123,6 +123,8 @@ DEFAULT_MAP: dict[str, Any] = {
             "to": "pathNode-2",
             "direction": "two_way",
             "capacity": 1,
+            "pathGroupId": "path-group-a",
+            "sequence": 1,
         },
         {
             "id": "edge-2",
@@ -130,6 +132,30 @@ DEFAULT_MAP: dict[str, Any] = {
             "to": "pathNode-3",
             "direction": "two_way",
             "capacity": 1,
+            "pathGroupId": "path-group-b",
+            "sequence": 1,
+        },
+    ],
+    "pathGroups": [
+        {
+            "id": "path-group-a",
+            "name": "Robot A Path",
+            "edgeIds": ["edge-1"],
+            "allowedRobotCodes": ["robot-001"],
+            "color": "#2563eb",
+            "status": "active",
+            "priority": 5,
+            "metadata": {"source": "seed"},
+        },
+        {
+            "id": "path-group-b",
+            "name": "Robot B Path",
+            "edgeIds": ["edge-2"],
+            "allowedRobotCodes": ["robot-002"],
+            "color": "#16a34a",
+            "status": "active",
+            "priority": 5,
+            "metadata": {"source": "seed"},
         },
     ],
 }
@@ -171,9 +197,82 @@ def default_robot_states(now: str | None = None) -> list[dict[str, Any]]:
     ]
 
 
+def map_with_default_path_groups(map_data: dict[str, Any] | SiteMap) -> dict[str, Any]:
+    map_json = map_data.model_dump(by_alias=True) if isinstance(map_data, SiteMap) else deepcopy(map_data)
+    if map_json.get("pathGroups"):
+        return map_json
+
+    path_edges = map_json.get("pathEdges", [])
+    edge_ids = [edge.get("id") for edge in path_edges if edge.get("id")]
+    if not edge_ids:
+        map_json["pathGroups"] = []
+        return map_json
+
+    group_by_edge: dict[str, tuple[str, int]] = {}
+    path_groups: list[dict[str, Any]] = []
+    if map_json.get("id") == DEFAULT_MAP.get("id"):
+        existing_edge_ids = set(edge_ids)
+        for group in DEFAULT_MAP.get("pathGroups", []):
+            group_edge_ids = [edge_id for edge_id in group.get("edgeIds", []) if edge_id in existing_edge_ids]
+            if not group_edge_ids:
+                continue
+            next_group = deepcopy(group)
+            next_group["edgeIds"] = group_edge_ids
+            path_groups.append(next_group)
+            for sequence, edge_id in enumerate(group_edge_ids, start=1):
+                group_by_edge[edge_id] = (str(group["id"]), sequence)
+
+    if not path_groups and len(edge_ids) > 1:
+        color_palette = ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#d97706"]
+        for index, edge_id in enumerate(edge_ids):
+            group_id = f"path-group-{index + 1}"
+            robot_code = f"robot-{index + 1:03d}" if index < 3 else None
+            path_groups.append(
+                {
+                    "id": group_id,
+                    "name": f"Path Group {index + 1}",
+                    "edgeIds": [edge_id],
+                    "allowedRobotCodes": [robot_code] if robot_code else [],
+                    "color": color_palette[index % len(color_palette)],
+                    "status": "active",
+                    "priority": 5,
+                    "metadata": {"source": "legacy-segmented"},
+                }
+            )
+            group_by_edge[edge_id] = (group_id, 1)
+
+    if not path_groups:
+        path_groups = [
+            {
+                "id": "default-path-group",
+                "name": "Default Path",
+                "edgeIds": edge_ids,
+                "allowedRobotCodes": [],
+                "color": "#111827",
+                "status": "active",
+                "priority": 5,
+                "metadata": {"source": "legacy"},
+            }
+        ]
+        group_by_edge = {edge_id: ("default-path-group", sequence) for sequence, edge_id in enumerate(edge_ids, start=1)}
+
+    for edge in path_edges:
+        edge_id = edge.get("id")
+        group = group_by_edge.get(edge_id)
+        if not group:
+            continue
+        if not edge.get("pathGroupId"):
+            edge["pathGroupId"] = group[0]
+        if edge.get("sequence") is None:
+            edge["sequence"] = group[1]
+
+    map_json["pathGroups"] = path_groups
+    return map_json
+
+
 def default_targets_from_map(map_data: dict[str, Any] | SiteMap, now: str | None = None) -> list[dict[str, Any]]:
     timestamp = now or utc_now()
-    map_json = map_data.model_dump(by_alias=True) if isinstance(map_data, SiteMap) else map_data
+    map_json = map_with_default_path_groups(map_data)
     map_id = str(map_json.get("id") or "site-a")
     targets: list[dict[str, Any]] = [
         {
@@ -251,6 +350,26 @@ def default_targets_from_map(map_data: dict[str, Any] | SiteMap, now: str | None
                 "geometryRef": edge["id"],
                 "metadata": {"from": edge.get("from"), "to": edge.get("to"), "capacity": edge.get("capacity", 1), "source": "map"},
                 "status": "active",
+                "version": str(map_json.get("configVersion") or "v1"),
+                "createdAt": timestamp,
+                "updatedAt": timestamp,
+            }
+        )
+    for group in map_json.get("pathGroups", []):
+        targets.append(
+            {
+                "targetId": group["id"],
+                "targetType": "pathGroup",
+                "displayName": group.get("name") or group["id"],
+                "mapId": map_id,
+                "pose": None,
+                "geometryRef": group["id"],
+                "metadata": {
+                    "edgeIds": group.get("edgeIds", []),
+                    "allowedRobotCodes": group.get("allowedRobotCodes", []),
+                    "source": "map",
+                },
+                "status": "active" if group.get("status", "active") == "active" else "inactive",
                 "version": str(map_json.get("configVersion") or "v1"),
                 "createdAt": timestamp,
                 "updatedAt": timestamp,
@@ -357,7 +476,7 @@ class JsonStore:
             tmp_path.replace(self.state_path)
 
     def current_map(self) -> SiteMap:
-        return SiteMap.model_validate(self.read()["map"])
+        return SiteMap.model_validate(map_with_default_path_groups(self.read()["map"]))
 
     def save_draft(self, map_data: SiteMap) -> str:
         state = self.read()
@@ -382,7 +501,7 @@ class JsonStore:
         draft = self.read()["drafts"].get(draft_id)
         if not draft:
             return None
-        return SiteMap.model_validate(draft["map"])
+        return SiteMap.model_validate(map_with_default_path_groups(draft["map"]))
 
     def validate_map(self, map_data: SiteMap) -> list[str]:
         issues: list[str] = []
@@ -390,6 +509,7 @@ class JsonStore:
         ids = set(object_ids)
         edge_ids = [edge.id for edge in map_data.pathEdges]
         path_node_ids = {item.id for item in map_data.objects if item.type == "pathNode"}
+        path_group_ids = [group.id for group in map_data.pathGroups]
         if map_data.width <= 0 or map_data.height <= 0:
             issues.append("map width and height must be positive")
         if map_data.gridSize <= 0:
@@ -398,6 +518,8 @@ class JsonStore:
             issues.append(f"object id {object_id} is duplicated")
         for edge_id in sorted({item_id for item_id in edge_ids if edge_ids.count(item_id) > 1}):
             issues.append(f"path edge id {edge_id} is duplicated")
+        for group_id in sorted({item_id for item_id in path_group_ids if path_group_ids.count(item_id) > 1}):
+            issues.append(f"path group id {group_id} is duplicated")
         for item in map_data.objects:
             bounds = self._object_bounds(item)
             if (
@@ -422,6 +544,15 @@ class JsonStore:
                 issues.append(f"{edge.id} to must reference a pathNode")
             if edge.capacity < 1:
                 issues.append(f"{edge.id} capacity must be greater than zero")
+            if edge.pathGroupId and edge.pathGroupId not in set(path_group_ids):
+                issues.append(f"{edge.id} references missing path group {edge.pathGroupId}")
+            if edge.speedLimit is not None and edge.speedLimit <= 0:
+                issues.append(f"{edge.id} speedLimit must be greater than zero")
+        try:
+            robot_codes = {robot.robotId for robot in self.robots()}
+        except Exception:
+            robot_codes = set()
+        issues.extend(self._validate_path_groups(map_data, edge_ids, robot_codes))
         issues.extend(self._validate_path_connectivity(path_node_ids, map_data))
         issues.extend(self._validate_collisions(map_data))
         return issues
@@ -579,6 +710,24 @@ class JsonStore:
             else:
                 normalized["targetPose"] = pose
         return validate_action_params(command, normalized)
+
+    def get_path_group(self, path_group_id: str) -> dict[str, Any] | None:
+        for group in self.current_map().pathGroups:
+            if group.id == path_group_id:
+                return group.model_dump()
+        return None
+
+    def validate_robot_path_group(self, robot_code: str, path_group_id: str | None) -> None:
+        if not path_group_id:
+            return
+        group = self.get_path_group(path_group_id)
+        if group is None:
+            raise ValueError(f"unknown pathGroupId: {path_group_id}")
+        if group.get("status") != "active":
+            raise ValueError(f"pathGroupId {path_group_id} is not active")
+        allowed = set(group.get("allowedRobotCodes") or [])
+        if allowed and robot_code not in allowed:
+            raise ValueError(f"robot {robot_code} is not allowed to use pathGroupId {path_group_id}")
 
     def list_robot_configs(self) -> list[RobotConfig]:
         state = self.read()
@@ -898,6 +1047,49 @@ class JsonStore:
         return issues
 
     @staticmethod
+    def _validate_path_groups(map_data: SiteMap, edge_ids: list[str], robot_codes: set[str]) -> list[str]:
+        issues: list[str] = []
+        if not map_data.pathGroups:
+            return issues
+        edge_by_id = {edge.id: edge for edge in map_data.pathEdges}
+        grouped_edge_ids: set[str] = set()
+        for group in map_data.pathGroups:
+            if not group.name.strip():
+                issues.append(f"path group {group.id} name is required")
+            for robot_code in group.allowedRobotCodes:
+                if robot_codes and robot_code not in robot_codes:
+                    issues.append(f"path group {group.id} references missing robot {robot_code}")
+            for edge_id in group.edgeIds:
+                if edge_id not in edge_by_id:
+                    issues.append(f"path group {group.id} references missing path edge {edge_id}")
+                    continue
+                grouped_edge_ids.add(edge_id)
+                edge = edge_by_id[edge_id]
+                if edge.pathGroupId and edge.pathGroupId != group.id:
+                    issues.append(f"path edge {edge.id} belongs to {edge.pathGroupId}, not {group.id}")
+            ordered_edges = [
+                edge_by_id[edge_id]
+                for edge_id in group.edgeIds
+                if edge_id in edge_by_id
+            ]
+            if len(ordered_edges) <= 1:
+                continue
+            ordered_edges = sorted(
+                ordered_edges,
+                key=lambda edge: edge.sequence if edge.sequence is not None else group.edgeIds.index(edge.id),
+            )
+            previous = ordered_edges[0]
+            for edge in ordered_edges[1:]:
+                if previous.to != edge.from_:
+                    issues.append(f"path group {group.id} is not continuous between {previous.id} and {edge.id}")
+                previous = edge
+        for edge_id in edge_ids:
+            edge = edge_by_id[edge_id]
+            if edge.pathGroupId and edge_id not in grouped_edge_ids:
+                issues.append(f"path edge {edge_id} declares pathGroupId but is not listed in that group")
+        return issues
+
+    @staticmethod
     def _validate_path_connectivity(path_node_ids: set[str], map_data: SiteMap) -> list[str]:
         if len(path_node_ids) <= 1:
             return []
@@ -908,6 +1100,8 @@ class JsonStore:
                 adjacency[edge.to].add(edge.from_)
         isolated = sorted(node_id for node_id, links in adjacency.items() if not links)
         issues = [f"path node {node_id} is disconnected" for node_id in isolated]
+        if map_data.pathGroups:
+            return issues
         if isolated:
             return issues
         visited: set[str] = set()

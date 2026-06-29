@@ -69,8 +69,30 @@ const fallbackMap: SiteMap = {
     { id: "resource-1", type: "resourcePoint", name: "充电点", x: 960, y: 160, width: 36, height: 36, color: "#fef3c7" }
   ],
   pathEdges: [
-    { id: "edge-1", from: "pathNode-1", to: "pathNode-2", direction: "two_way", capacity: 1 },
-    { id: "edge-2", from: "pathNode-2", to: "pathNode-3", direction: "two_way", capacity: 1 }
+    { id: "edge-1", from: "pathNode-1", to: "pathNode-2", direction: "two_way", capacity: 1, pathGroupId: "path-group-a", sequence: 1 },
+    { id: "edge-2", from: "pathNode-2", to: "pathNode-3", direction: "two_way", capacity: 1, pathGroupId: "path-group-b", sequence: 1 }
+  ],
+  pathGroups: [
+    {
+      id: "path-group-a",
+      name: "Robot A Path",
+      edgeIds: ["edge-1"],
+      allowedRobotCodes: ["robot-001"],
+      color: "#2563eb",
+      status: "active",
+      priority: 5,
+      metadata: { source: "fallback" }
+    },
+    {
+      id: "path-group-b",
+      name: "Robot B Path",
+      edgeIds: ["edge-2"],
+      allowedRobotCodes: ["robot-002"],
+      color: "#16a34a",
+      status: "active",
+      priority: 5,
+      metadata: { source: "fallback" }
+    }
   ]
 };
 

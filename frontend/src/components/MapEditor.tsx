@@ -1,8 +1,8 @@
 import { CircleDot, Diamond, MousePointer2, Pentagon, Route, Square, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PointerEvent } from "react";
 import { Badge, Button } from "./ui";
-import type { MapObject, MapObjectType, RobotState, SiteMap } from "../lib/types";
+import type { MapObject, MapObjectType, PathEdge, PathGroup, RobotState, SiteMap } from "../lib/types";
 import { cn } from "../lib/utils";
 
 type Tool = "select" | MapObjectType;
@@ -32,6 +32,8 @@ const strokeColors: Record<MapObjectType, string> = {
   resourcePoint: "#d97706"
 };
 
+const pathGroupColors = ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#d97706"];
+
 function objectDefaults(type: MapObjectType, x: number, y: number, count: number): MapObject {
   const base = {
     id: `${type}-${Date.now()}-${count}`,
@@ -56,6 +58,51 @@ function objectDefaults(type: MapObjectType, x: number, y: number, count: number
   return { ...base, radius: 6 };
 }
 
+function defaultPathGroup(edges: PathEdge[]): PathGroup {
+  return {
+    id: "default-path-group",
+    name: "默认路径",
+    edgeIds: edges.map((edge) => edge.id),
+    allowedRobotCodes: [],
+    color: "#111827",
+    status: "active",
+    priority: 5,
+    metadata: { source: "legacy" }
+  };
+}
+
+function normalizedPathGroups(map: SiteMap): PathGroup[] {
+  const groups = map.pathGroups?.length ? map.pathGroups : [defaultPathGroup(map.pathEdges)];
+  return groups.map((group, index) => ({
+    ...group,
+    color: group.color || pathGroupColors[index % pathGroupColors.length],
+    edgeIds: group.edgeIds ?? [],
+    allowedRobotCodes: group.allowedRobotCodes ?? [],
+    metadata: group.metadata ?? {}
+  }));
+}
+
+function orderedGroupEdges(map: SiteMap, group: PathGroup): PathEdge[] {
+  const edges = map.pathEdges.filter((edge) => edge.pathGroupId === group.id || group.edgeIds.includes(edge.id));
+  return edges.sort((first, second) => {
+    const firstSequence = first.sequence ?? group.edgeIds.indexOf(first.id);
+    const secondSequence = second.sequence ?? group.edgeIds.indexOf(second.id);
+    return firstSequence - secondSequence;
+  });
+}
+
+function groupNodeIds(map: SiteMap, group: PathGroup): string[] {
+  const nodeIds = Array.isArray(group.metadata.nodeIds) ? group.metadata.nodeIds.map(String) : [];
+  if (nodeIds.length) {
+    return nodeIds;
+  }
+  const edges = orderedGroupEdges(map, group);
+  if (!edges.length) {
+    return [];
+  }
+  return [edges[0].from, ...edges.map((edge) => edge.to)];
+}
+
 interface MapEditorProps {
   map: SiteMap;
   robots?: RobotState[];
@@ -70,9 +117,17 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
   const [dragId, setDragId] = useState<string | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
+  const pathGroups = useMemo(() => normalizedPathGroups(map), [map]);
+  const [selectedPathGroupId, setSelectedPathGroupId] = useState(pathGroups[0]?.id ?? "default-path-group");
 
   const selected = map.objects.find((item) => item.id === selectedId) ?? null;
-  const pathNodes = useMemo(() => map.objects.filter((item) => item.type === "pathNode"), [map.objects]);
+  const activePathGroup = pathGroups.find((group) => group.id === selectedPathGroupId) ?? pathGroups[0];
+
+  useEffect(() => {
+    if (!pathGroups.some((group) => group.id === selectedPathGroupId)) {
+      setSelectedPathGroupId(pathGroups[0]?.id ?? "default-path-group");
+    }
+  }, [pathGroups, selectedPathGroupId]);
 
   function toMapPoint(event: PointerEvent<SVGSVGElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -112,22 +167,48 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
     const point = toMapPoint(event);
     const nextObject = objectDefaults(tool, point.x, point.y, map.objects.length);
     const nextObjects = [...map.objects, nextObject];
-    const lastNode = pathNodes[pathNodes.length - 1];
-    const nextEdges =
-      tool === "pathNode" && lastNode
-        ? [
-            ...map.pathEdges,
-            {
-              id: `edge-${Date.now()}`,
-              from: lastNode.id,
-              to: nextObject.id,
-              direction: "two_way" as const,
-              capacity: 1
-            }
-          ]
-        : map.pathEdges;
+    let nextEdges = map.pathEdges;
+    let nextGroups = pathGroups;
+    if (tool === "pathNode" && activePathGroup) {
+      const groupNodes = groupNodeIds(map, activePathGroup);
+      const lastNodeId = groupNodes[groupNodes.length - 1];
+      const nextNodeIds = [...groupNodes, nextObject.id];
+      if (lastNodeId) {
+        const edgeId = `edge-${Date.now()}`;
+        nextEdges = [
+          ...map.pathEdges,
+          {
+            id: edgeId,
+            from: lastNodeId,
+            to: nextObject.id,
+            direction: "two_way" as const,
+            capacity: 1,
+            pathGroupId: activePathGroup.id,
+            sequence: activePathGroup.edgeIds.length + 1
+          }
+        ];
+        nextGroups = pathGroups.map((group) =>
+          group.id === activePathGroup.id
+            ? {
+                ...group,
+                edgeIds: [...group.edgeIds, edgeId],
+                metadata: { ...group.metadata, nodeIds: nextNodeIds }
+              }
+            : group
+        );
+      } else {
+        nextGroups = pathGroups.map((group) =>
+          group.id === activePathGroup.id
+            ? {
+                ...group,
+                metadata: { ...group.metadata, nodeIds: nextNodeIds }
+              }
+            : group
+        );
+      }
+    }
 
-    onMapChange({ ...map, objects: nextObjects, pathEdges: nextEdges });
+    onMapChange({ ...map, objects: nextObjects, pathEdges: nextEdges, pathGroups: nextGroups });
     onSelectedChange(nextObject.id);
     setTool("select");
   }
@@ -136,12 +217,46 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
     if (!selected) {
       return;
     }
+    const removedEdgeIds = map.pathEdges
+      .filter((edge) => edge.from === selected.id || edge.to === selected.id)
+      .map((edge) => edge.id);
     onMapChange({
       ...map,
       objects: map.objects.filter((item) => item.id !== selected.id),
-      pathEdges: map.pathEdges.filter((edge) => edge.from !== selected.id && edge.to !== selected.id)
+      pathEdges: map.pathEdges.filter((edge) => edge.from !== selected.id && edge.to !== selected.id),
+      pathGroups: pathGroups.map((group) => {
+        const nodeIds = groupNodeIds(map, group).filter((nodeId) => nodeId !== selected.id);
+        return {
+          ...group,
+          edgeIds: group.edgeIds.filter((edgeId) => !removedEdgeIds.includes(edgeId)),
+          metadata: { ...group.metadata, nodeIds }
+        };
+      })
     });
     onSelectedChange(null);
+  }
+
+  function handleCreatePathGroup() {
+    const id = `path-group-${Date.now()}`;
+    const nextGroup: PathGroup = {
+      id,
+      name: `路径组 ${pathGroups.length + 1}`,
+      edgeIds: [],
+      allowedRobotCodes: [],
+      color: pathGroupColors[pathGroups.length % pathGroupColors.length],
+      status: "active",
+      priority: 5,
+      metadata: { nodeIds: [] }
+    };
+    onMapChange({ ...map, pathGroups: [...pathGroups, nextGroup] });
+    setSelectedPathGroupId(id);
+  }
+
+  function updatePathGroup(next: PathGroup) {
+    onMapChange({
+      ...map,
+      pathGroups: pathGroups.map((group) => (group.id === next.id ? next : group))
+    });
   }
 
   const gridLines = [];
@@ -171,6 +286,21 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
           })}
         </div>
         <div className="flex items-center gap-2">
+          <select
+            className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+            value={activePathGroup?.id ?? ""}
+            onChange={(event) => setSelectedPathGroupId(event.currentTarget.value)}
+          >
+            {pathGroups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+          <Button variant="secondary" onClick={handleCreatePathGroup}>
+            <Route size={15} />
+            新建路径组
+          </Button>
           <Button variant={showGrid ? "secondary" : "ghost"} onClick={() => setShowGrid(!showGrid)}>
             网格
           </Button>
@@ -214,14 +344,27 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
               <text x={map.width - 78} y={map.height - 10}>{map.width}, {map.height}</text>
             </g>
 
-            <g stroke="#111827" strokeOpacity="0.38" strokeWidth="3" pointerEvents="none">
+            <g pointerEvents="none">
               {map.pathEdges.map((edge) => {
                 const from = map.objects.find((item) => item.id === edge.from);
                 const to = map.objects.find((item) => item.id === edge.to);
                 if (!from || !to) {
                   return null;
                 }
-                return <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+                const group = pathGroups.find((item) => item.id === edge.pathGroupId || item.edgeIds.includes(edge.id));
+                const isActive = group?.id === activePathGroup?.id;
+                return (
+                  <line
+                    key={edge.id}
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    stroke={group?.color ?? "#111827"}
+                    strokeOpacity={isActive ? 0.9 : 0.34}
+                    strokeWidth={isActive ? 5 : 3}
+                  />
+                );
               })}
             </g>
 
@@ -259,6 +402,14 @@ export function MapEditor({ map, robots = [], selectedId, onMapChange, onSelecte
         </div>
 
         <aside className="rounded-xl border border-neutral-200 bg-white p-4">
+          {activePathGroup && (
+            <PathGroupInspector
+              group={activePathGroup}
+              robots={robots}
+              edgeCount={orderedGroupEdges(map, activePathGroup).length}
+              onChange={updatePathGroup}
+            />
+          )}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-neutral-950">对象属性</h3>
@@ -347,6 +498,85 @@ function MapShape({
         {item.name}
       </text>
     </g>
+  );
+}
+
+function PathGroupInspector({
+  group,
+  robots,
+  edgeCount,
+  onChange
+}: {
+  group: PathGroup;
+  robots: RobotState[];
+  edgeCount: number;
+  onChange: (group: PathGroup) => void;
+}) {
+  return (
+    <div className="mb-5 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-950">路径组</h3>
+          <p className="text-xs text-neutral-500">{edgeCount} 段路径边</p>
+        </div>
+        <Badge tone={group.status === "active" ? "green" : group.status === "blocked" ? "red" : "neutral"}>
+          {group.status}
+        </Badge>
+      </div>
+      <div className="grid gap-3">
+        <label className="block text-xs font-medium text-neutral-500">
+          名称
+          <input
+            className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+            value={group.name}
+            onChange={(event) => onChange({ ...group, name: event.currentTarget.value })}
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs font-medium text-neutral-500">
+            颜色
+            <input
+              className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-2 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+              type="color"
+              value={group.color}
+              onChange={(event) => onChange({ ...group, color: event.currentTarget.value })}
+            />
+          </label>
+          <label className="block text-xs font-medium text-neutral-500">
+            状态
+            <select
+              className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+              value={group.status}
+              onChange={(event) => onChange({ ...group, status: event.currentTarget.value as PathGroup["status"] })}
+            >
+              <option value="active">active</option>
+              <option value="disabled">disabled</option>
+              <option value="blocked">blocked</option>
+            </select>
+          </label>
+        </div>
+        <label className="block text-xs font-medium text-neutral-500">
+          绑定机器人
+          <select
+            className="mt-1 h-24 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-neutral-400"
+            multiple
+            value={group.allowedRobotCodes}
+            onChange={(event) =>
+              onChange({
+                ...group,
+                allowedRobotCodes: Array.from(event.currentTarget.selectedOptions).map((option) => option.value)
+              })
+            }
+          >
+            {robots.map((robot) => (
+              <option key={robot.robotId} value={robot.robotId}>
+                {robot.robotId}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
   );
 }
 

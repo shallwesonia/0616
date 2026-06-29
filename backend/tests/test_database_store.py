@@ -2,7 +2,9 @@ from copy import deepcopy
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 
+from backend.app.db_models import SiteMapRecord
 from backend.app.database_store import DatabaseStore
 from backend.app.schemas import (
     ActionCreate,
@@ -78,6 +80,15 @@ def test_create_action_targets_requested_robot_code(tmp_path):
 def test_database_store_seeds_and_publishes_map(tmp_path):
     store = create_store(tmp_path)
     current_map = store.current_map()
+    assert [group.id for group in current_map.pathGroups] == ["path-group-a", "path-group-b"]
+    assert current_map.pathEdges[0].pathGroupId == "path-group-a"
+    assert current_map.pathEdges[1].pathGroupId == "path-group-b"
+    assert store.validate_map(current_map) == []
+
+    targets = store.list_targets()
+    path_group_targets = [target for target in targets if target.targetType == "pathGroup"]
+    assert {target.targetId for target in path_group_targets} == {"path-group-a", "path-group-b"}
+
     updated_map = current_map.model_copy(deep=True)
     updated_map.name = "Database map"
 
@@ -95,6 +106,68 @@ def test_database_store_seeds_and_publishes_map(tmp_path):
     assert health["backend"] == "sqlite"
     assert health["workspaceId"] == str(WORKSPACE_ID)
     assert health["draftCount"] == 1
+
+
+def test_map_validation_rejects_invalid_path_group_bindings(tmp_path):
+    store = create_store(tmp_path)
+    invalid_map = store.current_map().model_copy(deep=True)
+    invalid_map.pathEdges[0].pathGroupId = "missing-path-group"
+    invalid_map.pathGroups[0].allowedRobotCodes = ["robot-missing"]
+
+    issues = store.validate_map(invalid_map)
+    assert any("references missing path group" in issue for issue in issues)
+    assert any("references missing robot" in issue for issue in issues)
+
+
+def test_legacy_map_read_adds_default_path_groups(tmp_path):
+    store = create_store(tmp_path)
+    with store.database.session() as session:
+        row = session.scalar(
+            select(SiteMapRecord).where(
+                SiteMapRecord.workspace_id == WORKSPACE_ID,
+                SiteMapRecord.status == "active",
+            )
+        )
+        assert row is not None
+        legacy_map = deepcopy(row.map_json)
+        legacy_map.pop("pathGroups", None)
+        for edge in legacy_map["pathEdges"]:
+            edge.pop("pathGroupId", None)
+            edge.pop("sequence", None)
+        row.map_json = legacy_map
+
+    current_map = store.current_map()
+    assert [group.id for group in current_map.pathGroups] == ["path-group-a", "path-group-b"]
+    assert current_map.pathEdges[0].pathGroupId == "path-group-a"
+    assert current_map.pathEdges[1].pathGroupId == "path-group-b"
+
+
+def test_legacy_custom_map_read_segments_edges_by_order(tmp_path):
+    store = create_store(tmp_path)
+    with store.database.session() as session:
+        row = session.scalar(
+            select(SiteMapRecord).where(
+                SiteMapRecord.workspace_id == WORKSPACE_ID,
+                SiteMapRecord.status == "active",
+            )
+        )
+        assert row is not None
+        legacy_map = deepcopy(row.map_json)
+        legacy_map.pop("pathGroups", None)
+        legacy_map["pathEdges"][0]["id"] = "custom-edge-a"
+        legacy_map["pathEdges"][1]["id"] = "custom-edge-b"
+        for edge in legacy_map["pathEdges"]:
+            edge.pop("pathGroupId", None)
+            edge.pop("sequence", None)
+        row.map_json = legacy_map
+
+    current_map = store.current_map()
+    assert [group.id for group in current_map.pathGroups] == ["path-group-1", "path-group-2"]
+    assert current_map.pathGroups[0].edgeIds == ["custom-edge-a"]
+    assert current_map.pathGroups[0].allowedRobotCodes == ["robot-001"]
+    assert current_map.pathGroups[1].allowedRobotCodes == ["robot-002"]
+    assert current_map.pathEdges[0].pathGroupId == "path-group-1"
+    assert current_map.pathEdges[1].pathGroupId == "path-group-2"
 
 
 def test_database_store_persists_messages_and_robot_state(tmp_path):

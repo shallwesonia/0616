@@ -18,6 +18,21 @@ export interface PathEdge {
   to: string;
   direction: "one_way" | "two_way";
   capacity: number;
+  pathGroupId?: string | null;
+  sequence?: number | null;
+  speedLimit?: number | null;
+  allowedRobotTypes?: string[];
+}
+
+export interface PathGroup {
+  id: string;
+  name: string;
+  edgeIds: string[];
+  allowedRobotCodes: string[];
+  color: string;
+  status: "active" | "disabled" | "blocked";
+  priority: number;
+  metadata: Record<string, unknown>;
 }
 
 export interface SiteMap {
@@ -29,6 +44,7 @@ export interface SiteMap {
   gridSize: number;
   objects: MapObject[];
   pathEdges: PathEdge[];
+  pathGroups: PathGroup[];
   configVersion: string;
 }
 
@@ -67,7 +83,8 @@ export type TargetType =
   | "inspectionPoint"
   | "zone"
   | "pathNode"
-  | "pathEdge";
+  | "pathEdge"
+  | "pathGroup";
 
 export interface TargetRegistryItem {
   targetId: string;
@@ -342,7 +359,7 @@ export interface SimulationAction {
 
 export interface ActionCommandSpecParam {
   label: string;
-  type: "number" | "string" | "select" | "target";
+  type: "number" | "string" | "select" | "target" | "pathGroup";
   required?: boolean;
   min?: number | null;
   max?: number | null;

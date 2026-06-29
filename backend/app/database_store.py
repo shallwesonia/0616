@@ -89,6 +89,7 @@ from .store import (
     default_robot_states,
     default_state,
     default_targets_from_map,
+    map_with_default_path_groups,
 )
 
 
@@ -269,7 +270,11 @@ class DatabaseStore(JsonStore):
                     )
                 ).all()
             )
-            for target_data in default_targets_from_map(DEFAULT_MAP):
+            try:
+                target_source_map: dict[str, Any] | SiteMap = self.current_map()
+            except RuntimeError:
+                target_source_map = DEFAULT_MAP
+            for target_data in default_targets_from_map(target_source_map):
                 target = TargetRegistryItem.model_validate(target_data)
                 if target.targetId not in existing_target_ids:
                     session.add(self._target_row(target))
@@ -301,7 +306,7 @@ class DatabaseStore(JsonStore):
             )
             if row is None:
                 raise RuntimeError("active map not found")
-            return SiteMap.model_validate(row.map_json)
+            return SiteMap.model_validate(map_with_default_path_groups(row.map_json))
 
     def save_draft(self, map_data: SiteMap) -> str:
         draft_id = new_id("draft")
@@ -333,7 +338,7 @@ class DatabaseStore(JsonStore):
                     MapDraftRecord.draft_id == draft_id,
                 )
             )
-            return SiteMap.model_validate(row.map_json) if row else None
+            return SiteMap.model_validate(map_with_default_path_groups(row.map_json)) if row else None
 
     def publish_draft(self, draft_id: str) -> SiteMap | None:
         with self.database.session() as session:
@@ -1017,10 +1022,12 @@ class DatabaseStore(JsonStore):
         scenario = self.get_scenario(request.scenarioId)
         if scenario is None:
             raise ValueError("scenario not found")
-        run_id = protocol_id("RUN")
+        run_id = request.runId or protocol_id("RUN")
         created_at = now_utc()
         scenario_json = scenario.model_dump(by_alias=True)
         with self.database.session() as session:
+            if self._run_row(session, run_id) is not None:
+                raise ValueError(f"runId already exists: {run_id}")
             row = SimulationRunRecord(
                 workspace_id=self.workspace_id,
                 run_id=run_id,
