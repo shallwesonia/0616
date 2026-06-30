@@ -388,6 +388,31 @@ export interface SimulationAction {
   finishedAt?: string | null;
 }
 
+export interface AgentDecision {
+  decisionId: string;
+  workspaceId: string;
+  runId: string;
+  taskId?: string | null;
+  traceId: string;
+  agentId: string;
+  agentType: "rule" | "ai";
+  decisionType: "plan_created" | "action_created" | "wait" | "retry" | "replan" | "stop" | "escalate" | "failed";
+  inputRefs: Record<string, unknown>;
+  currentStateVersion?: number | null;
+  selectedRobotCode?: string | null;
+  planId?: string | null;
+  actionIds: string[];
+  reason: string;
+  confidence?: number | null;
+  createdAt: string;
+}
+
+export interface RuleScheduleResponse {
+  decision: AgentDecision;
+  action?: SimulationAction | null;
+  currentState?: CurrentState | null;
+}
+
 export interface ActionCommandSpecParam {
   label: string;
   type: "number" | "string" | "select" | "target" | "pathGroup";

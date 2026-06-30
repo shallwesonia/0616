@@ -1594,6 +1594,8 @@ class DatabaseStore(JsonStore):
             row.status = "Issued"
             row.issued_at = now
             row.result_json = result
+            if row.plan_id and row.plan_step_id:
+                self._update_plan_step_status(session, row.plan_id, row.plan_step_id, "Issued")
             self._add_trace_span(
                 session,
                 run_id=row.run_id,
@@ -1609,6 +1611,31 @@ class DatabaseStore(JsonStore):
             )
             self._refresh_current_state(session, row.run_id, None, now)
         return self.get_action(action_id)
+
+    def _update_plan_step_status(self, session: Any, plan_id: str, plan_step_id: str, status: str) -> None:
+        step_row = session.scalar(
+            select(SimulationPlanStepRecord).where(
+                SimulationPlanStepRecord.workspace_id == self.workspace_id,
+                SimulationPlanStepRecord.plan_id == plan_id,
+                SimulationPlanStepRecord.plan_step_id == plan_step_id,
+            )
+        )
+        if step_row is not None:
+            step_row.status = status
+        plan_row = session.scalar(
+            select(SimulationPlanRecord).where(
+                SimulationPlanRecord.workspace_id == self.workspace_id,
+                SimulationPlanRecord.plan_id == plan_id,
+            )
+        )
+        if plan_row is not None:
+            next_steps: list[dict[str, Any]] = []
+            for step in plan_row.steps_json:
+                if step.get("planStepId") == plan_step_id:
+                    next_steps.append({**step, "status": status})
+                else:
+                    next_steps.append(step)
+            plan_row.steps_json = next_steps
 
     def get_action(self, action_id: str) -> SimulationAction | None:
         with self.database.session() as session:

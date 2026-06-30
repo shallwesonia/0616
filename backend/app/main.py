@@ -1050,7 +1050,37 @@ def schedule_simulation_run(run_id: str, request: RuleScheduleRequest) -> RuleSc
         _record_agent_decision(decision)
         return RuleScheduleResponse(decision=decision, action=None, currentState=state)
 
-    step = next((item for item in task.activePlan.steps if item.status not in {"Succeeded", "Failed", "Cancelled"}), task.activePlan.steps[0])
+    existing_plan_step_ids = {
+        action.planStepId
+        for action in store.list_actions(run_id=run_id, task_id=task.taskId, limit=1000)
+        if action.planId == task.activePlan.planId and action.planStepId
+    }
+    step = next(
+        (
+            item
+            for item in task.activePlan.steps
+            if item.status in {"Pending", "Ready"} and item.planStepId not in existing_plan_step_ids
+        ),
+        None,
+    )
+    if step is None:
+        decision = AgentDecision(
+            decisionId=protocol_id("DECISION"),
+            runId=run_id,
+            taskId=task.taskId,
+            traceId=trace_id,
+            decisionType="wait",
+            inputRefs={"taskId": task.taskId, "planId": task.activePlan.planId, "strategy": request.strategy},
+            currentStateVersion=state.stateVersion if state else None,
+            selectedRobotCode=selected_robot,
+            planId=task.activePlan.planId,
+            reason="no pending plan step is available for scheduling",
+            confidence=1.0,
+            createdAt=utc_now(),
+        )
+        _record_agent_decision(decision)
+        return RuleScheduleResponse(decision=decision, action=None, currentState=state)
+
     action: SimulationAction | None = None
     action_ids: list[str] = []
     decision_type = "plan_created"

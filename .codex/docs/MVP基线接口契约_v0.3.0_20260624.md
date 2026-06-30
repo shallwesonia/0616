@@ -35,7 +35,7 @@
 | 消息总成 | `GET /api/v1/messages`、`POST /api/v1/messages`、`POST /api/v1/commands` |
 | 仿真运行 | `POST /api/v1/simulation-runs`、`POST /api/v1/simulation-runs/{run_id}/start` |
 | Task/Plan/Action | `POST /api/v1/simulation-runs/{run_id}/tasks`、`POST /api/v1/simulation-runs/{run_id}/task-chains`、`POST /api/v1/tasks/{task_id}/plans`、`POST /api/v1/actions` |
-| 规则调度 / AgentDecision | `POST /api/v1/simulation-runs/{run_id}/schedule` |
+| 规则调度 / AgentDecision | `POST /api/v1/simulation-runs/{run_id}/schedule`，支持把当前 Task 的下一个 Pending PlanStep 推进为 Action |
 | Trace/State | `GET /api/v1/current-states/{run_id}`、`GET /api/v1/traces/{trace_id}/graph` |
 
 完整字段以 `docs/contracts/openapi.json` 为准。
@@ -121,6 +121,22 @@ Topic：
 - 每个 Task 保持独立 Plan、Action、Observation、CurrentState 和 Trace 链路。
 - 激活新 Plan 时，旧 activePlan 标记为 `Superseded`，历史版本不可覆盖。
 - 手动编排任务采用“一个 Task + 多个串行 PlanStep”，循环在前端展开为普通 PlanStep，不在契约中引入嵌套 LoopStep。
+
+### 规则调度推进 PlanStep
+
+`POST /api/v1/simulation-runs/{run_id}/schedule` 当前支持两类用途：
+
+- 任务级调度：未指定 `taskId` 时，从当前 Run 中选择可调度 Task。
+- PlanStep 推进：指定 `taskId` 时，从该 Task 的 Active Plan 中选择第一个 `Pending/Ready` 且尚未生成 Action 的 `PlanStep`。
+
+当 `autoIssue=true` 时，调度器会：
+
+- 创建 `Action`。
+- 通过消息总成下发 Command。
+- 写入 `AgentDecision` 消息。
+- 将对应 `PlanStep.status` 更新为 `Issued`。
+
+当前不会自动连续推进全部步骤；后续应在 Observation / CurrentState 闭环稳定后，再由规则调度器或 Agent Service 判断是否自动推进下一步。
 
 ### 路径组兼容扩展
 

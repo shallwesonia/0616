@@ -602,8 +602,31 @@ def test_manual_orchestration_task_plan_steps(tmp_path, monkeypatch):
         assert plan["steps"][1]["dependsOn"] == ["1"]
         assert plan["steps"][4]["params"]["x"] == 100
 
+        first_schedule = client.post(
+            f"/api/v1/simulation-runs/{run_id}/schedule",
+            json={"taskId": task["taskId"], "strategy": "specified_robot", "robotCode": "robot-001", "autoIssue": True},
+        )
+        assert first_schedule.status_code == 200
+        first_payload = first_schedule.json()
+        assert first_payload["decision"]["decisionType"] == "action_created"
+        assert first_payload["action"]["planStepId"] == plan["steps"][0]["planStepId"]
+        assert first_payload["action"]["command"] == "goto_pose"
+
+        second_schedule = client.post(
+            f"/api/v1/simulation-runs/{run_id}/schedule",
+            json={"taskId": task["taskId"], "strategy": "specified_robot", "robotCode": "robot-001", "autoIssue": True},
+        )
+        assert second_schedule.status_code == 200
+        second_payload = second_schedule.json()
+        assert second_payload["decision"]["decisionType"] == "action_created"
+        assert second_payload["action"]["planStepId"] == plan["steps"][1]["planStepId"]
+        assert second_payload["action"]["command"] == "pick"
+
         refreshed = client.get(f"/api/v1/tasks/{task['taskId']}").json()
         assert refreshed["activePlan"]["planId"] == plan["planId"]
+        assert refreshed["activePlan"]["steps"][0]["status"] == "Issued"
+        assert refreshed["activePlan"]["steps"][1]["status"] == "Issued"
+        assert refreshed["activePlan"]["steps"][2]["status"] == "Pending"
 
 
 def test_mqtt_contract_uses_dog_command_result_topics():

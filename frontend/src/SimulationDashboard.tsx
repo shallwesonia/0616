@@ -67,6 +67,7 @@ import {
   recoverSimulationEvent,
   replayRunMessage,
   resumeSimulationRun,
+  scheduleNextPlanStep,
   startSimulationRun,
   stopSimulationRun,
   validateScenario
@@ -820,6 +821,27 @@ export function SimulationDashboard() {
     await refreshRun(run.runId);
   }
 
+  async function handleScheduleNextPlanStep() {
+    if (!run || !activeTask) {
+      return;
+    }
+    const response = await scheduleNextPlanStep(run.runId, {
+      taskId: activeTask.taskId,
+      strategy: "specified_robot",
+      robotCode: effectiveRobotCode,
+      autoIssue: true,
+      operatorId: "rule-agent"
+    });
+    if (response.action) {
+      setSelectedActionId(response.action.actionId);
+      setSelectedPlanStepId(response.action.planStepId ?? selectedPlanStepId);
+      setStatus(`Rule scheduler issued ${response.action.command} / ${response.action.actionId}`);
+    } else {
+      setStatus(`Rule scheduler: ${response.decision.reason}`);
+    }
+    await refreshRun(run.runId);
+  }
+
   async function handleQuickAction(nextCommand: "goto_pose" | "where" | "stop", target?: { x: number; y: number }) {
     if (target) {
       setTargetX(Math.round(target.x));
@@ -1353,6 +1375,10 @@ export function SimulationDashboard() {
                 <Workflow size={15} />
                 生成 Plan vNext
               </Button>
+              <Button className="mt-2 w-full" disabled={!run || !activeTask} onClick={() => void handleScheduleNextPlanStep()}>
+                <Zap size={15} />
+                规则推进下一步
+              </Button>
               <div className="mt-4 space-y-2">
                 {activeTask?.activePlan?.steps.map((step) => (
                   <button
@@ -1366,7 +1392,7 @@ export function SimulationDashboard() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{step.actionType}</span>
-                      <Badge tone="neutral">Step {step.sequence}</Badge>
+                      <Badge tone={statusTone(step.status)}>Step {step.sequence} / {step.status}</Badge>
                     </div>
                     <div className="mt-2 text-xs text-neutral-500">{step.successCondition}</div>
                   </button>

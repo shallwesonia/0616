@@ -15,6 +15,7 @@ import type {
   RobotConfig,
   RobotCreate,
   RobotState,
+  RuleScheduleResponse,
   ScenarioSummary,
   ScenarioValidationResponse,
   SimulationAction,
@@ -356,6 +357,22 @@ export function createSimulationAction(payload: {
   return request<SimulationAction>("/api/v1/actions", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export function scheduleNextPlanStep(
+  runId: string,
+  payload: {
+    taskId?: string | null;
+    strategy?: "specified_robot" | "idle_first" | "nearest" | "lowest_load";
+    robotCode?: string | null;
+    autoIssue?: boolean;
+    operatorId?: string;
+  } = {}
+) {
+  return request<RuleScheduleResponse>(`/api/v1/simulation-runs/${encodeURIComponent(runId)}/schedule`, {
+    method: "POST",
+    body: JSON.stringify({ strategy: "specified_robot", autoIssue: true, operatorId: "rule-agent", ...payload })
   });
 }
 
