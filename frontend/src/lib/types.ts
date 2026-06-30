@@ -321,6 +321,37 @@ export interface BatchTaskResponse {
   tasks: SimulationTask[];
 }
 
+export interface TaskChainItem {
+  chainId: string;
+  runId: string;
+  taskId: string;
+  sequence: number;
+  dependsOn: string[];
+  triggerCondition: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  task?: SimulationTask | null;
+}
+
+export interface TaskChain {
+  chainId: string;
+  runId: string;
+  name: string;
+  description?: string | null;
+  mode: string;
+  triggerPolicy: string;
+  robotStrategy: string;
+  failurePolicy: string;
+  priority: number;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  items: TaskChainItem[];
+}
+
 export interface SimulationRun {
   runId: string;
   scenarioId: string;

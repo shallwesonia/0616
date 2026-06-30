@@ -34,7 +34,7 @@
 | 执行体 | `GET /api/v1/executors`、`POST /api/v1/executors`、`POST /api/v1/executors/{executor_id}/stop` |
 | 消息总成 | `GET /api/v1/messages`、`POST /api/v1/messages`、`POST /api/v1/commands` |
 | 仿真运行 | `POST /api/v1/simulation-runs`、`POST /api/v1/simulation-runs/{run_id}/start` |
-| Task/Action | `POST /api/v1/simulation-runs/{run_id}/tasks`、`POST /api/v1/actions` |
+| Task/Plan/Action | `POST /api/v1/simulation-runs/{run_id}/tasks`、`POST /api/v1/simulation-runs/{run_id}/task-chains`、`POST /api/v1/tasks/{task_id}/plans`、`POST /api/v1/actions` |
 | 规则调度 / AgentDecision | `POST /api/v1/simulation-runs/{run_id}/schedule` |
 | Trace/State | `GET /api/v1/current-states/{run_id}`、`GET /api/v1/traces/{trace_id}/graph` |
 
@@ -101,8 +101,26 @@ Topic：
 - Robot Config：`robot_configs`
 - Robot Instance：`robot_instances`
 - Executor Instance：`executor_instances`
-- Simulation Run / Task / Plan / Action / Observation / CurrentState / Snapshot / Trace
+- Simulation Run / Task / TaskChain / Plan / Action / Observation / CurrentState / Snapshot / Trace
 - AgentDecision：当前通过 `agentDecision` 消息和 Trace 引用固化，后续可升级为独立表。
+
+### TaskChain 与 Plan vNext 扩展
+
+本次在保持原 Task / Plan / Action 链路不变的前提下，新增连续任务和手动 Plan 版本能力：
+
+- `POST /api/v1/simulation-runs/{run_id}/task-chains`：创建连续任务链，将连续业务拆成多个标准 `Task`。
+- `GET /api/v1/simulation-runs/{run_id}/task-chains`：查询当前 Run 下连续任务链。
+- `GET /api/v1/task-chains/{chain_id}`：查询单个连续任务链及其 Task 投影。
+- `POST /api/v1/tasks/{task_id}/plans`：创建手动 `Plan vNext`，可承载 `strategy=manual_orchestration` 的多步串行编排。
+- `POST /api/v1/tasks/{task_id}/replan`：重规划兼容入口，语义同创建新的 Plan 版本。
+
+约束：
+
+- 连续任务不直接下发指令；指令仍由 `Action` 通过消息总成下发。
+- `TaskChain` 只负责组织多个 Task 的顺序、触发条件和失败策略。
+- 每个 Task 保持独立 Plan、Action、Observation、CurrentState 和 Trace 链路。
+- 激活新 Plan 时，旧 activePlan 标记为 `Superseded`，历史版本不可覆盖。
+- 手动编排任务采用“一个 Task + 多个串行 PlanStep”，循环在前端展开为普通 PlanStep，不在契约中引入嵌套 LoopStep。
 
 ### 路径组兼容扩展
 

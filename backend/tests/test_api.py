@@ -292,6 +292,21 @@ def test_target_registry_validates_action_targets(tmp_path, monkeypatch):
         assert payload["params"]["x"] == 760
         assert payload["params"]["y"] == 420
 
+        target_pose_response = client.post(
+            "/api/v1/actions",
+            json={
+                "runId": run_id,
+                "robotCode": "robot-001",
+                "command": "goto_pose",
+                "params": {"targetId": "inspection-001", "targetType": "inspectionPoint", "x": 760, "y": 420},
+            },
+        )
+        assert target_pose_response.status_code == 200
+        target_pose_payload = target_pose_response.json()
+        assert target_pose_payload["params"]["targetId"] == "inspection-001"
+        assert target_pose_payload["params"]["x"] == 520
+        assert target_pose_payload["params"]["y"] == 360
+
         invalid = client.post(
             "/api/v1/actions",
             json={
@@ -418,6 +433,177 @@ def test_rule_scheduler_creates_agent_decision_and_action(tmp_path, monkeypatch)
         decisions = client.get("/api/v1/messages", params={"messageType": "agentDecision", "limit": 10})
         assert decisions.status_code == 200
         assert any(message["payload"]["decisionId"] == payload["decision"]["decisionId"] for message in decisions.json())
+
+
+def test_task_chain_and_manual_plan_creation(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-task-chain.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000094"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        run_response = client.post("/api/v1/simulation-runs", json={"scenarioId": "default-site-a"})
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+
+        chain_response = client.post(
+            f"/api/v1/simulation-runs/{run_id}/task-chains",
+            json={
+                "name": "serial transport chain",
+                "mode": "serial",
+                "triggerPolicy": "auto",
+                "robotStrategy": "specified",
+                "failurePolicy": "stop_chain",
+                "priority": 4,
+                "tasks": [
+                    {
+                        "goal": "go to source",
+                        "input": {"command": "goto_pose", "target": {"x": 300, "y": 220, "z": 0, "yaw": 0}},
+                        "triggerCondition": "chain_started",
+                    },
+                    {
+                        "goal": "go to target",
+                        "input": {"command": "goto_pose", "target": {"x": 520, "y": 340, "z": 0, "yaw": 0}},
+                        "dependsOn": ["1"],
+                        "triggerCondition": "previous_succeeded",
+                    },
+                ],
+            },
+        )
+        assert chain_response.status_code == 200
+        chain = chain_response.json()
+        assert chain["chainId"].startswith("CHAIN-")
+        assert len(chain["items"]) == 2
+        assert chain["items"][1]["status"] == "Waiting"
+        first_task_id = chain["items"][0]["taskId"]
+
+        listed = client.get(f"/api/v1/simulation-runs/{run_id}/task-chains")
+        assert listed.status_code == 200
+        assert listed.json()[0]["chainId"] == chain["chainId"]
+
+        task_response = client.get(f"/api/v1/tasks/{first_task_id}")
+        assert task_response.status_code == 200
+        task = task_response.json()
+        assert task["constraints"]["chainId"] == chain["chainId"]
+        original_plan_id = task["activePlan"]["planId"]
+
+        plan_response = client.post(
+            f"/api/v1/tasks/{first_task_id}/plans",
+            json={
+                "strategy": "manual",
+                "generatedBy": "simulation-console",
+                "activate": True,
+                "steps": [
+                    {
+                        "actionType": "goto_pose",
+                        "target": {"x": 310, "y": 230},
+                        "params": {"x": 310, "y": 230, "z": 0, "yaw": 0},
+                        "successCondition": "arrived source",
+                    },
+                    {
+                        "actionType": "where",
+                        "params": {"queryMode": "pose"},
+                        "dependsOn": ["1"],
+                        "successCondition": "pose confirmed",
+                    },
+                ],
+                "assumptions": {"reason": "operator adjusted route"},
+            },
+        )
+        assert plan_response.status_code == 200
+        plan = plan_response.json()
+        assert plan["planVersion"] == 2
+        assert plan["status"] == "Active"
+        assert len(plan["steps"]) == 2
+
+        plans = client.get(f"/api/v1/tasks/{first_task_id}/plans")
+        assert plans.status_code == 200
+        statuses = {item["planId"]: item["status"] for item in plans.json()}
+        assert statuses[original_plan_id] == "Superseded"
+        assert statuses[plan["planId"]] == "Active"
+
+        refreshed = client.get(f"/api/v1/tasks/{first_task_id}").json()
+        assert refreshed["activePlan"]["planId"] == plan["planId"]
+
+
+def test_manual_orchestration_task_plan_steps(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-manual-orchestration.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000095"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    with TestClient(app) as client:
+        run_response = client.post("/api/v1/simulation-runs", json={"scenarioId": "default-site-a"})
+        assert run_response.status_code == 200
+        run_id = run_response.json()["runId"]
+
+        task_response = client.post(
+            f"/api/v1/simulation-runs/{run_id}/tasks",
+            json={
+                "goal": "manual pick and place orchestration",
+                "input": {"mode": "manual_orchestration", "stepCount": 5, "robotCode": "robot-001"},
+                "constraints": {"robotCode": "robot-001", "orchestrationMode": "serial"},
+                "priority": 5,
+            },
+        )
+        assert task_response.status_code == 200
+        task = task_response.json()
+
+        plan_response = client.post(
+            f"/api/v1/tasks/{task['taskId']}/plans",
+            json={
+                "strategy": "manual_orchestration",
+                "generatedBy": "simulation-console",
+                "activate": True,
+                "steps": [
+                    {
+                        "actionType": "goto_pose",
+                        "target": {"targetId": "station-1", "targetType": "station"},
+                        "params": {"targetId": "station-1", "targetType": "station", "speed": 1, "tolerance": 50},
+                    },
+                    {
+                        "actionType": "pick",
+                        "target": {"targetId": "cargo-001", "targetType": "cargo"},
+                        "params": {"targetId": "cargo-001", "targetType": "cargo", "durationMinMs": 3000, "durationMaxMs": 5000},
+                        "dependsOn": ["1"],
+                    },
+                    {
+                        "actionType": "goto_pose",
+                        "target": {"targetId": "station-2", "targetType": "station"},
+                        "params": {"targetId": "station-2", "targetType": "station", "speed": 1, "tolerance": 50},
+                        "dependsOn": ["2"],
+                    },
+                    {
+                        "actionType": "place",
+                        "target": {"targetId": "station-2", "targetType": "station"},
+                        "params": {"targetId": "station-2", "targetType": "station", "durationMinMs": 3000, "durationMaxMs": 5000},
+                        "dependsOn": ["3"],
+                    },
+                    {
+                        "actionType": "goto_pose",
+                        "target": {"x": 100, "y": 100, "z": 0, "yaw": 0},
+                        "params": {"x": 100, "y": 100, "z": 0, "yaw": 0, "speed": 1, "tolerance": 50},
+                        "dependsOn": ["4"],
+                    },
+                ],
+                "assumptions": {"source": "simulation-dashboard", "orchestrationMode": "serial", "expandedStepCount": 5},
+            },
+        )
+        assert plan_response.status_code == 200
+        plan = plan_response.json()
+        assert plan["strategy"] == "manual_orchestration"
+        assert plan["planVersion"] == 2
+        assert plan["status"] == "Active"
+        assert [step["actionType"] for step in plan["steps"]] == ["goto_pose", "pick", "goto_pose", "place", "goto_pose"]
+        assert plan["steps"][1]["dependsOn"] == ["1"]
+        assert plan["steps"][4]["params"]["x"] == 100
+
+        refreshed = client.get(f"/api/v1/tasks/{task['taskId']}").json()
+        assert refreshed["activePlan"]["planId"] == plan["planId"]
 
 
 def test_mqtt_contract_uses_dog_command_result_topics():

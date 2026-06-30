@@ -653,6 +653,50 @@ class BatchTaskResponse(BaseModel):
     tasks: list["SimulationTask"] = Field(default_factory=list)
 
 
+class TaskChainTaskCreate(BaseModel):
+    goal: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    priority: int | None = None
+    expectedOutcome: str | None = None
+    dependsOn: list[str] = Field(default_factory=list)
+    triggerCondition: str = "previous_succeeded"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskChainCreate(BaseModel):
+    name: str
+    description: str | None = None
+    mode: Literal["serial", "parallel", "mixed"] = "serial"
+    triggerPolicy: Literal["auto", "manual_confirm", "event_driven"] = "auto"
+    robotStrategy: Literal["specified", "idle_first", "nearest", "lowest_load"] = "specified"
+    failurePolicy: Literal["stop_chain", "skip_task", "retry", "replan", "switch_robot"] = "stop_chain"
+    priority: int = 5
+    tasks: list[TaskChainTaskCreate] = Field(default_factory=list, min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdBy: str = "simulation-console"
+
+
+class PlanStepCreate(BaseModel):
+    actionType: str
+    target: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
+    dependsOn: list[str] = Field(default_factory=list)
+    successCondition: str | None = None
+    failurePolicy: str = "surface_to_operator"
+    timeoutMs: int = 60000
+    status: str = "Pending"
+
+
+class SimulationPlanCreate(BaseModel):
+    strategy: str = "manual"
+    steps: list[PlanStepCreate] = Field(default_factory=list, min_length=1)
+    dependencies: dict[str, Any] = Field(default_factory=dict)
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    generatedBy: str = "simulation-console"
+    activate: bool = True
+
+
 class PlanStep(BaseModel):
     planStepId: str
     sequence: int
@@ -698,6 +742,37 @@ class SimulationTask(BaseModel):
     startedAt: str | None = None
     finishedAt: str | None = None
     activePlan: SimulationPlan | None = None
+
+
+class TaskChainItem(BaseModel):
+    chainId: str
+    runId: str
+    taskId: str
+    sequence: int
+    dependsOn: list[str] = Field(default_factory=list)
+    triggerCondition: str = "previous_succeeded"
+    status: str = "Pending"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    task: SimulationTask | None = None
+
+
+class TaskChain(BaseModel):
+    chainId: str
+    runId: str
+    name: str
+    description: str | None = None
+    mode: str
+    triggerPolicy: str
+    robotStrategy: str
+    failurePolicy: str
+    priority: int
+    status: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdBy: str
+    createdAt: str
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    items: list[TaskChainItem] = Field(default_factory=list)
 
 
 class ActionCreate(BaseModel):

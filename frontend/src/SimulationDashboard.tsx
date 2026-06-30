@@ -1,7 +1,9 @@
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   Bot,
   Box,
   CheckCircle2,
@@ -24,6 +26,7 @@ import {
   Send,
   SlidersHorizontal,
   Square,
+  Trash2,
   Workflow,
   Zap
 } from "lucide-react";
@@ -37,6 +40,8 @@ import {
   createSimulationTask,
   createSimulationTasksBatch,
   createSimulationTaskFromTemplate,
+  createTaskChain,
+  createTaskPlan,
   exportSimulationRun,
   getActionCommandSpecs,
   getActionTrace,
@@ -51,6 +56,7 @@ import {
   getSimulationRuns,
   getSimulationSocketUrl,
   getSimulationTasks,
+  getTaskChains,
   getTaskTrace,
   getTaskTemplates,
   getTargets,
@@ -83,6 +89,7 @@ import type {
   SimulationSnapshot,
   SimulationTask,
   SiteMap,
+  TaskChain,
   TaskTemplate,
   TargetRegistryItem,
   TraceGraph,
@@ -104,6 +111,27 @@ const exceptionOptions = [
 const messageFilters = ["All", "Command", "Ack", "Telemetry", "Event", "Alert", "Interface", "AgentDecision"] as const;
 const sandboxReplayEnabled = false;
 
+const orchestrationActions = ["goto_pose", "pick", "place", "wait", "where"] as const;
+
+type OrchestrationAction = (typeof orchestrationActions)[number];
+
+interface OrchestrationStepDraft {
+  id: string;
+  actionType: OrchestrationAction;
+  targetId: string;
+  targetType: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  speed: number;
+  tolerance: number;
+  durationMinMs: number;
+  durationMaxMs: number;
+  waitMs: number;
+  reason: string;
+}
+
 const recoveryModes = [
   { value: "manual", label: "手动恢复" },
   { value: "retry", label: "重试恢复" },
@@ -122,6 +150,7 @@ export function SimulationDashboard() {
   const [runs, setRuns] = useState<SimulationRun[]>([]);
   const [run, setRun] = useState<SimulationRun | null>(null);
   const [tasks, setTasks] = useState<SimulationTask[]>([]);
+  const [taskChains, setTaskChains] = useState<TaskChain[]>([]);
   const [actions, setActions] = useState<SimulationAction[]>([]);
   const [currentState, setCurrentState] = useState<CurrentState | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
@@ -136,9 +165,15 @@ export function SimulationDashboard() {
   const [selectedPlanStepId, setSelectedPlanStepId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("default-site-a");
   const [templateId, setTemplateId] = useState("");
-  const [taskMode, setTaskMode] = useState<"manual" | "template" | "batch">("manual");
+  const [taskMode, setTaskMode] = useState<"manual" | "template" | "batch" | "chain" | "orchestration">("manual");
   const [taskGoal, setTaskGoal] = useState("搬运到分拣工位");
   const [batchCount, setBatchCount] = useState(5);
+  const [chainStepCount, setChainStepCount] = useState(3);
+  const [orchestrationSteps, setOrchestrationSteps] = useState<OrchestrationStepDraft[]>(() => [createOrchestrationStep("goto_pose")]);
+  const [loopStartTargetId, setLoopStartTargetId] = useState("");
+  const [loopEndTargetId, setLoopEndTargetId] = useState("");
+  const [loopCount, setLoopCount] = useState(3);
+  const [loopWaitMs, setLoopWaitMs] = useState(0);
   const [commandMode, setCommandMode] = useState<"quick" | "advanced">("quick");
   const [command, setCommand] = useState("goto_pose");
   const [actionParams, setActionParams] = useState<Record<string, string | number>>({});
@@ -211,6 +246,7 @@ export function SimulationDashboard() {
   );
   const visibleObservations = observations.filter((observation) => !effectiveRobotCode || observation.robotCode === effectiveRobotCode);
   const targetOptions = targets.filter((target) => target.status === "active");
+  const poseTargetOptions = targetOptions.filter((target) => Boolean(target.pose));
   const suggestedRobotCode = useMemo(() => nextRobotCode(availableRobotCodes), [availableRobotCodes]);
   const scenarioCheckSummary = useMemo(() => {
     const checks = scenarioValidation?.checks ?? [];
@@ -271,8 +307,9 @@ export function SimulationDashboard() {
   }
 
   async function refreshRun(runId: string) {
-    const [nextTasks, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
+    const [nextTasks, nextTaskChains, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
       getSimulationTasks(runId),
+      getTaskChains(runId),
       getSimulationActions(runId),
       getCurrentState(runId),
       getRunMessages(runId),
@@ -283,6 +320,7 @@ export function SimulationDashboard() {
       getExecutors()
     ]);
     setTasks(nextTasks);
+    setTaskChains(nextTaskChains);
     setActions(nextActions);
     setCurrentState(nextState);
     setMessages(nextMessages);
@@ -367,6 +405,102 @@ export function SimulationDashboard() {
       setExceptionTarget(effectiveRobotCode);
     }
   }, [effectiveRobotCode, selectedExceptionOption.targetType]);
+
+  function handleActionParamChange(name: string, value: string | number) {
+    setActionParams((current) => ({ ...current, [name]: value }));
+  }
+
+  function handleActionTargetChange(name: string, targetId: string) {
+    const target = targetOptions.find((item) => item.targetId === targetId);
+    const nextValues: Record<string, string | number> = { [name]: targetId };
+    if (!targetId) {
+      nextValues.targetType = "";
+      setActionParams((current) => ({ ...current, ...nextValues }));
+      return;
+    }
+    if (target) {
+      nextValues.targetType = target.targetType;
+    }
+    if (selectedCommandSpec?.command === "goto_pose") {
+      if (target?.pose) {
+        const x = Number(target.pose.x);
+        const y = Number(target.pose.y);
+        const z = Number(target.pose.z ?? 0);
+        const yaw = Number(target.pose.yaw ?? 0);
+        nextValues.x = x;
+        nextValues.y = y;
+        nextValues.z = z;
+        nextValues.yaw = yaw;
+        setTargetX(x);
+        setTargetY(y);
+        setTargetZ(z);
+        setTargetYaw(yaw);
+      } else if (target) {
+        setStatus(`Target ${target.targetId} has no pose; manual coordinates unchanged`);
+      }
+    }
+    setActionParams((current) => ({ ...current, ...nextValues }));
+  }
+
+  function updateOrchestrationStep(id: string, patch: Partial<OrchestrationStepDraft>) {
+    setOrchestrationSteps((current) => current.map((step) => (step.id === id ? { ...step, ...patch } : step)));
+  }
+
+  function handleOrchestrationTargetChange(id: string, targetId: string) {
+    const target = targetOptions.find((item) => item.targetId === targetId);
+    setOrchestrationSteps((current) =>
+      current.map((step) => (step.id === id ? { ...step, ...orchestrationTargetPatch(target, targetId) } : step))
+    );
+  }
+
+  function handleAddOrchestrationStep(actionType: OrchestrationAction = "goto_pose") {
+    setOrchestrationSteps((current) => [...current, createOrchestrationStep(actionType, orchestrationTargetPatch(poseTargetOptions[0]))]);
+  }
+
+  function handleRemoveOrchestrationStep(id: string) {
+    setOrchestrationSteps((current) => (current.length > 1 ? current.filter((step) => step.id !== id) : current));
+  }
+
+  function handleMoveOrchestrationStep(id: string, direction: -1 | 1) {
+    setOrchestrationSteps((current) => {
+      const index = current.findIndex((step) => step.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
+        return current;
+      }
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
+  function handleGenerateLoopSteps() {
+    const startTarget = poseTargetOptions.find((target) => target.targetId === loopStartTargetId) ?? poseTargetOptions[0];
+    const endTarget =
+      poseTargetOptions.find((target) => target.targetId === loopEndTargetId)
+      ?? poseTargetOptions.find((target) => target.targetId !== startTarget?.targetId)
+      ?? poseTargetOptions[1];
+    if (!startTarget || !endTarget) {
+      setStatus("Loop requires two targets with pose");
+      return;
+    }
+    const count = Math.max(1, Math.min(50, loopCount));
+    const nextSteps: OrchestrationStepDraft[] = [];
+    for (let index = 0; index < count; index += 1) {
+      nextSteps.push(createOrchestrationStep("goto_pose", orchestrationTargetPatch(startTarget)));
+      if (loopWaitMs > 0) {
+        nextSteps.push(createOrchestrationStep("wait", { waitMs: loopWaitMs, durationMinMs: loopWaitMs, durationMaxMs: loopWaitMs }));
+      }
+      nextSteps.push(createOrchestrationStep("goto_pose", orchestrationTargetPatch(endTarget)));
+      if (loopWaitMs > 0) {
+        nextSteps.push(createOrchestrationStep("wait", { waitMs: loopWaitMs, durationMinMs: loopWaitMs, durationMaxMs: loopWaitMs }));
+      }
+    }
+    setLoopStartTargetId(startTarget.targetId);
+    setLoopEndTargetId(endTarget.targetId);
+    setOrchestrationSteps(nextSteps);
+    setStatus(`Loop expanded to ${nextSteps.length} serial steps`);
+  }
 
   useEffect(() => {
     if (!run) {
@@ -528,6 +662,139 @@ export function SimulationDashboard() {
       autoRun: false
     });
     setStatus(`批量任务已创建 ${response.createdCount}/${response.requestedCount}，批次 ${response.batchId}`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleCreateTaskChain() {
+    if (!run) {
+      return;
+    }
+    const source = stationTarget(selectedScenario?.map, "station-1") ?? { x: Math.max(0, targetX - 120), y: targetY };
+    const target = { x: targetX, y: targetY };
+    const chainSteps = [
+      {
+        goal: `${taskGoal} / 到取货点`,
+        input: { command: "goto_pose", target: commandTargetParams(source.x, source.y, targetZ, targetYaw) },
+        triggerCondition: "chain_started"
+      },
+      {
+        goal: `${taskGoal} / 搬运到目标点`,
+        input: { command: "goto_pose", target: commandTargetParams(target.x, target.y, targetZ, targetYaw) },
+        dependsOn: ["1"],
+        triggerCondition: "previous_succeeded"
+      },
+      {
+        goal: `${taskGoal} / 位置确认`,
+        input: { command: "where", target: commandTargetParams(target.x, target.y, targetZ, targetYaw) },
+        dependsOn: ["2"],
+        triggerCondition: "previous_succeeded"
+      }
+    ].slice(0, chainStepCount);
+    const chain = await createTaskChain(run.runId, {
+      name: taskGoal,
+      mode: "serial",
+      triggerPolicy: "auto",
+      robotStrategy: "specified",
+      failurePolicy: "stop_chain",
+      priority: 5,
+      tasks: chainSteps.map((step, index) => ({
+        ...step,
+        constraints: {
+          robotCode: effectiveRobotCode,
+          order: index + 1
+        }
+      })),
+      metadata: {
+        source: "simulation-dashboard",
+        robotCode: effectiveRobotCode
+      }
+    });
+    setStatus(`连续任务已创建 ${chain.chainId}，包含 ${chain.items.length} 个 Task`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleCreateOrchestratedTask() {
+    if (!run) {
+      return;
+    }
+    const invalidTargetStep = orchestrationSteps.find(
+      (step) => ["pick", "place"].includes(step.actionType) && !step.targetId
+    );
+    if (invalidTargetStep) {
+      setStatus(`${invalidTargetStep.actionType} requires a target object`);
+      return;
+    }
+    const nextTask = await createSimulationTask(run.runId, {
+      goal: taskGoal,
+      input: {
+        mode: "manual_orchestration",
+        stepCount: orchestrationSteps.length,
+        robotCode: effectiveRobotCode
+      },
+      constraints: {
+        robotCode: effectiveRobotCode,
+        orchestrationMode: "serial"
+      },
+      priority: 5,
+      expectedOutcome: "manual orchestration plan"
+    });
+    const plan = await createTaskPlan(nextTask.taskId, {
+      strategy: "manual_orchestration",
+      generatedBy: "simulation-console",
+      activate: true,
+      steps: orchestrationSteps.map((step, index) => ({
+        actionType: step.actionType,
+        target: orchestrationPlanTarget(step),
+        params: orchestrationStepParams(step),
+        dependsOn: index === 0 ? [] : [String(index)],
+        successCondition: orchestrationSuccessCondition(step.actionType),
+        failurePolicy: "surface_to_operator",
+        timeoutMs: orchestrationTimeoutMs(step),
+        status: "Pending"
+      })),
+      assumptions: {
+        source: "simulation-dashboard",
+        orchestrationMode: "serial",
+        robotCode: effectiveRobotCode,
+        expandedStepCount: orchestrationSteps.length
+      }
+    });
+    setSelectedTaskId(nextTask.taskId);
+    setSelectedPlanStepId(plan.steps[0]?.planStepId ?? "");
+    setStatus(`Manual orchestration created ${nextTask.taskId} / Plan v${plan.planVersion}`);
+    await refreshRun(run.runId);
+  }
+
+  async function handleCreateManualPlan() {
+    if (!run || !activeTask) {
+      return;
+    }
+    const params =
+      command === "goto_pose"
+        ? { ...commandTargetParams(targetX, targetY, targetZ, targetYaw), ...normalizedActionParams(actionParams, selectedCommandSpec) }
+        : normalizedActionParams(actionParams, selectedCommandSpec);
+    const plan = await createTaskPlan(activeTask.taskId, {
+      strategy: "manual",
+      generatedBy: "simulation-console",
+      activate: true,
+      steps: [
+        {
+          actionType: command,
+          target: command === "goto_pose" ? commandTargetParams(targetX, targetY, targetZ, targetYaw) : {},
+          params,
+          successCondition: command === "where" ? "pose confirmed" : "result event task.succeeded",
+          failurePolicy: "surface_to_operator",
+          timeoutMs,
+          status: "Pending"
+        }
+      ],
+      assumptions: {
+        source: "simulation-dashboard",
+        replacedPlanId: activeTask.activePlan?.planId ?? null
+      }
+    });
+    setSelectedPlanStepId(plan.steps[0]?.planStepId ?? "");
+    setStatus(`已创建并激活 Plan v${plan.planVersion}`);
     await refreshRun(run.runId);
   }
 
@@ -881,8 +1148,8 @@ export function SimulationDashboard() {
             <Panel className="p-4">
               <PanelTitle icon={ClipboardList} title="建任务" subtitle="手动创建或从模板生成" />
               <div className="mt-4 grid gap-3">
-                <div className="grid grid-cols-3 gap-1 rounded-lg border border-neutral-200 bg-neutral-50 p-1">
-                  {(["manual", "template", "batch"] as const).map((mode) => (
+                <div className="grid grid-cols-5 gap-1 rounded-lg border border-neutral-200 bg-neutral-50 p-1">
+                  {(["manual", "template", "batch", "chain", "orchestration"] as const).map((mode) => (
                     <button
                       key={mode}
                       className={`h-8 rounded-md text-xs font-medium transition ${
@@ -890,7 +1157,7 @@ export function SimulationDashboard() {
                       }`}
                       onClick={() => setTaskMode(mode)}
                     >
-                      {mode === "manual" ? "手动" : mode === "template" ? "模板" : "批量"}
+                      {mode === "manual" ? "手动" : mode === "template" ? "模板" : mode === "batch" ? "批量" : mode === "chain" ? "连续" : "编排"}
                     </button>
                   ))}
                 </div>
@@ -917,19 +1184,148 @@ export function SimulationDashboard() {
                 {taskMode === "batch" && (
                   <NumberInput label="批量数量" value={batchCount} onChange={(value) => setBatchCount(Math.max(1, Math.min(50, value)))} />
                 )}
+                {taskMode === "chain" && (
+                  <NumberInput label="连续步骤" value={chainStepCount} onChange={(value) => setChainStepCount(Math.max(2, Math.min(3, value)))} />
+                )}
+                {taskMode === "orchestration" && (
+                  <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-neutral-700">Manual Plan Steps</span>
+                      <Badge tone="blue">{orchestrationSteps.length} steps</Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <select
+                        className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                        value={loopStartTargetId}
+                        onChange={(event) => setLoopStartTargetId(event.currentTarget.value)}
+                      >
+                        <option value="">Loop start</option>
+                        {poseTargetOptions.map((target) => (
+                          <option key={target.targetId} value={target.targetId}>
+                            {target.displayName} / {target.targetId}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                        value={loopEndTargetId}
+                        onChange={(event) => setLoopEndTargetId(event.currentTarget.value)}
+                      >
+                        <option value="">Loop end</option>
+                        {poseTargetOptions.map((target) => (
+                          <option key={target.targetId} value={target.targetId}>
+                            {target.displayName} / {target.targetId}
+                          </option>
+                        ))}
+                      </select>
+                      <NumberInput label="Loop count" value={loopCount} onChange={(value) => setLoopCount(Math.max(1, Math.min(50, value)))} />
+                      <NumberInput label="Dwell ms" value={loopWaitMs} onChange={(value) => setLoopWaitMs(Math.max(0, value))} />
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button type="button" variant="secondary" onClick={() => handleAddOrchestrationStep("goto_pose")}>
+                        <Plus size={15} />
+                        Add step
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={handleGenerateLoopSteps}>
+                        <RotateCcw size={15} />
+                        Expand loop
+                      </Button>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {orchestrationSteps.map((step, index) => (
+                        <div key={step.id} className="rounded-lg border border-neutral-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <Badge tone="neutral">Step {index + 1}</Badge>
+                            <div className="flex items-center gap-1">
+                              <Button type="button" className="h-8 w-8 px-0" variant="ghost" onClick={() => handleMoveOrchestrationStep(step.id, -1)} disabled={index === 0}>
+                                <ArrowUp size={14} />
+                              </Button>
+                              <Button type="button" className="h-8 w-8 px-0" variant="ghost" onClick={() => handleMoveOrchestrationStep(step.id, 1)} disabled={index === orchestrationSteps.length - 1}>
+                                <ArrowDown size={14} />
+                              </Button>
+                              <Button type="button" className="h-8 w-8 px-0" variant="ghost" onClick={() => handleRemoveOrchestrationStep(step.id)} disabled={orchestrationSteps.length <= 1}>
+                                <Trash2 size={14} />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <select
+                              className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                              value={step.actionType}
+                              onChange={(event) => updateOrchestrationStep(step.id, { actionType: event.currentTarget.value as OrchestrationAction })}
+                            >
+                              {orchestrationActions.map((action) => (
+                                <option key={action} value={action}>
+                                  {action}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="h-9 rounded-lg border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400"
+                              value={step.targetId}
+                              onChange={(event) => handleOrchestrationTargetChange(step.id, event.currentTarget.value)}
+                            >
+                              <option value="">Manual / no target</option>
+                              {targetOptions.map((target) => (
+                                <option key={target.targetId} value={target.targetId}>
+                                  {target.displayName} / {target.targetId}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {step.actionType === "goto_pose" && (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <NumberInput label="X" value={step.x} onChange={(value) => updateOrchestrationStep(step.id, { x: value, targetId: "", targetType: "" })} />
+                              <NumberInput label="Y" value={step.y} onChange={(value) => updateOrchestrationStep(step.id, { y: value, targetId: "", targetType: "" })} />
+                              <NumberInput label="Yaw" value={step.yaw} onChange={(value) => updateOrchestrationStep(step.id, { yaw: value })} />
+                              <NumberInput label="Speed" value={step.speed} onChange={(value) => updateOrchestrationStep(step.id, { speed: Math.max(0.1, value) })} />
+                            </div>
+                          )}
+                          {["pick", "place"].includes(step.actionType) && (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <NumberInput label="Min ms" value={step.durationMinMs} onChange={(value) => updateOrchestrationStep(step.id, { durationMinMs: Math.max(0, value) })} />
+                              <NumberInput label="Max ms" value={step.durationMaxMs} onChange={(value) => updateOrchestrationStep(step.id, { durationMaxMs: Math.max(step.durationMinMs, value) })} />
+                            </div>
+                          )}
+                          {step.actionType === "wait" && (
+                            <div className="mt-2">
+                              <NumberInput label="Wait ms" value={step.waitMs} onChange={(value) => updateOrchestrationStep(step.id, { waitMs: Math.max(0, value), durationMinMs: Math.max(0, value), durationMaxMs: Math.max(0, value) })} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Button
                   disabled={!run || (taskMode === "template" && !templateId)}
                   onClick={() =>
                     taskMode === "batch"
                       ? void handleCreateBatchTasks()
-                      : void handleCreateTask(taskMode === "template")
+                      : taskMode === "chain"
+                        ? void handleCreateTaskChain()
+                        : taskMode === "orchestration"
+                          ? void handleCreateOrchestratedTask()
+                          : void handleCreateTask(taskMode === "template")
                   }
                 >
                   <ListChecks size={15} />
-                  {taskMode === "manual" ? "创建手动任务" : taskMode === "template" ? "模板生成任务" : "批量生成任务"}
+                  {taskMode === "manual" ? "创建手动任务" : taskMode === "template" ? "模板生成任务" : taskMode === "batch" ? "批量生成任务" : taskMode === "chain" ? "创建连续任务" : "创建编排任务"}
                 </Button>
               </div>
               <div className="mt-4 space-y-2">
+                {taskChains.slice(0, 3).map((chain) => (
+                  <div key={chain.chainId} className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-800">{chain.name}</span>
+                      <Badge tone={statusTone(chain.status)}>{chain.mode}</Badge>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+                      <span className="truncate font-mono">{chain.chainId}</span>
+                      <span>{chain.items.length} tasks</span>
+                    </div>
+                  </div>
+                ))}
                 {tasks.slice(0, 6).map((task) => (
                   <button
                     key={task.taskId}
@@ -953,6 +1349,10 @@ export function SimulationDashboard() {
 
             <Panel className="p-4">
               <PanelTitle icon={Workflow} title="Plan" subtitle="版本与步骤" />
+              <Button className="mt-4 w-full" variant="secondary" disabled={!activeTask} onClick={() => void handleCreateManualPlan()}>
+                <Workflow size={15} />
+                生成 Plan vNext
+              </Button>
               <div className="mt-4 space-y-2">
                 {activeTask?.activePlan?.steps.map((step) => (
                   <button
@@ -1054,7 +1454,8 @@ export function SimulationDashboard() {
                       targetOptions={targetOptions}
                       pathGroups={selectedScenario?.map ? normalizedPathGroups(selectedScenario.map) : []}
                       selectedRobotCode={effectiveRobotCode}
-                      onChange={(name, value) => setActionParams((current) => ({ ...current, [name]: value }))}
+                      onChange={handleActionParamChange}
+                      onTargetChange={handleActionTargetChange}
                     />
                     <NumberInput label="超时 ms" value={timeoutMs} onChange={(value) => setTimeoutMs(Math.max(1000, value))} />
                     <Button disabled={!run} onClick={handleSendAction}>
@@ -1635,7 +2036,8 @@ function ActionParamForm({
   targetOptions,
   pathGroups,
   selectedRobotCode,
-  onChange
+  onChange,
+  onTargetChange
 }: {
   spec: ActionCommandSpec | null;
   values: Record<string, string | number>;
@@ -1643,6 +2045,7 @@ function ActionParamForm({
   pathGroups: PathGroup[];
   selectedRobotCode: string;
   onChange: (name: string, value: string | number) => void;
+  onTargetChange?: (name: string, value: string) => void;
 }) {
   if (!spec) {
     return <EmptyState text="暂无指令参数规格" />;
@@ -1675,7 +2078,9 @@ function ActionParamForm({
                 <select
                   className="mt-1 h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-950 outline-none focus:border-neutral-400"
                   value={String(value)}
-                  onChange={(event) => onChange(name, event.currentTarget.value)}
+                  onChange={(event) =>
+                    onTargetChange ? onTargetChange(name, event.currentTarget.value) : onChange(name, event.currentTarget.value)
+                  }
                 >
                   <option value="">选择目标对象</option>
                   {options.map((target) => (
@@ -1854,6 +2259,127 @@ function normalizedActionParams(
     normalized[name] = field.type === "number" ? Number(rawValue) : rawValue;
   }
   return normalized;
+}
+
+function createOrchestrationStep(
+  actionType: OrchestrationAction,
+  seed: Partial<OrchestrationStepDraft> = {}
+): OrchestrationStepDraft {
+  return {
+    id: `step-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    actionType,
+    targetId: "",
+    targetType: "",
+    x: 760,
+    y: 420,
+    z: 0,
+    yaw: 0,
+    speed: 1,
+    tolerance: 50,
+    durationMinMs: 3000,
+    durationMaxMs: 5000,
+    waitMs: 1000,
+    reason: "manual_wait",
+    ...seed
+  };
+}
+
+function orchestrationTargetPatch(
+  target: TargetRegistryItem | undefined,
+  fallbackTargetId = ""
+): Partial<OrchestrationStepDraft> {
+  if (!target) {
+    return {
+      targetId: fallbackTargetId,
+      targetType: ""
+    };
+  }
+  return {
+    targetId: target.targetId,
+    targetType: target.targetType,
+    ...(target.pose
+      ? {
+          x: Number(target.pose.x),
+          y: Number(target.pose.y),
+          z: Number(target.pose.z ?? 0),
+          yaw: Number(target.pose.yaw ?? 0)
+        }
+      : {})
+  };
+}
+
+function orchestrationPlanTarget(step: OrchestrationStepDraft): Record<string, unknown> {
+  if (step.targetId) {
+    return {
+      targetId: step.targetId,
+      targetType: step.targetType || undefined,
+      ...(step.actionType === "goto_pose" ? { x: step.x, y: step.y, z: step.z, yaw: step.yaw } : {})
+    };
+  }
+  if (step.actionType === "goto_pose") {
+    return { x: step.x, y: step.y, z: step.z, yaw: step.yaw };
+  }
+  return {};
+}
+
+function orchestrationStepParams(step: OrchestrationStepDraft): Record<string, unknown> {
+  if (step.actionType === "goto_pose") {
+    return {
+      ...(step.targetId ? { targetId: step.targetId, targetType: step.targetType } : {}),
+      x: step.x,
+      y: step.y,
+      z: step.z,
+      yaw: step.yaw,
+      speed: step.speed,
+      tolerance: step.tolerance
+    };
+  }
+  if (step.actionType === "pick" || step.actionType === "place") {
+    return {
+      targetId: step.targetId,
+      targetType: step.targetType,
+      durationMinMs: step.durationMinMs,
+      durationMaxMs: Math.max(step.durationMinMs, step.durationMaxMs)
+    };
+  }
+  if (step.actionType === "wait") {
+    const duration = Math.max(0, step.waitMs || step.durationMinMs);
+    return {
+      durationMinMs: duration,
+      durationMaxMs: duration,
+      reason: step.reason
+    };
+  }
+  if (step.actionType === "where") {
+    return { queryMode: "pose" };
+  }
+  return {};
+}
+
+function orchestrationSuccessCondition(actionType: OrchestrationAction) {
+  if (actionType === "goto_pose") {
+    return "arrived target pose";
+  }
+  if (actionType === "pick") {
+    return "object picked";
+  }
+  if (actionType === "place") {
+    return "object placed";
+  }
+  if (actionType === "wait") {
+    return "wait completed";
+  }
+  return "pose confirmed";
+}
+
+function orchestrationTimeoutMs(step: OrchestrationStepDraft) {
+  if (step.actionType === "wait") {
+    return Math.max(1000, step.waitMs + 1000);
+  }
+  if (step.actionType === "pick" || step.actionType === "place") {
+    return Math.max(1000, step.durationMaxMs + 5000);
+  }
+  return 60000;
 }
 
 function messageCategory(message: MessageRecord) {

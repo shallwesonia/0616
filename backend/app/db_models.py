@@ -311,6 +311,53 @@ class SimulationPlanStepRecord(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="Pending")
 
 
+class SimulationTaskChainRecord(Base):
+    __tablename__ = "task_chains"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "chain_id", name="uk_simulation_task_chains_chain_id"),
+        Index("idx_simulation_task_chains_run", "workspace_id", "run_id", "created_at"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    chain_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512))
+    mode: Mapped[str] = mapped_column(String(32), nullable=False, default="serial")
+    trigger_policy: Mapped[str] = mapped_column(String(64), nullable=False, default="auto")
+    robot_strategy: Mapped[str] = mapped_column(String(64), nullable=False, default="specified")
+    failure_policy: Mapped[str] = mapped_column(String(64), nullable=False, default="stop_chain")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Ready")
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="simulation-console")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SimulationTaskChainItemRecord(Base):
+    __tablename__ = "task_chain_items"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "chain_id", "sequence", name="uk_simulation_task_chain_items_sequence"),
+        Index("idx_simulation_task_chain_items_chain", "workspace_id", "chain_id", "sequence"),
+        {"schema": "simulation"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    chain_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    depends_on_json: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
+    trigger_condition: Mapped[str] = mapped_column(String(128), nullable=False, default="previous_succeeded")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="Pending")
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+
+
 class SimulationActionRecord(Base):
     __tablename__ = "actions"
     __table_args__ = (

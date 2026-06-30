@@ -2201,6 +2201,135 @@
         }
       }
     },
+    "/api/v1/simulation-runs/{run_id}/task-chains": {
+      "post": {
+        "summary": "Create Simulation Task Chain",
+        "operationId": "create_simulation_task_chain_api_v1_simulation_runs__run_id__task_chains_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskChainCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskChain"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Simulation Task Chains",
+        "operationId": "list_simulation_task_chains_api_v1_simulation_runs__run_id__task_chains_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskChain"
+                  },
+                  "title": "Response List Simulation Task Chains Api V1 Simulation Runs  Run Id  Task Chains Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/task-chains/{chain_id}": {
+      "get": {
+        "summary": "Get Simulation Task Chain",
+        "operationId": "get_simulation_task_chain_api_v1_task_chains__chain_id__get",
+        "parameters": [
+          {
+            "name": "chain_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chain Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskChain"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/{task_id}": {
       "get": {
         "summary": "Get Task",
@@ -2267,6 +2396,102 @@
                     "type": "object"
                   },
                   "title": "Response List Task Plans Api V1 Tasks  Task Id  Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Task Plan",
+        "operationId": "create_task_plan_api_v1_tasks__task_id__plans_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationPlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationPlan"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/replan": {
+      "post": {
+        "summary": "Replan Task",
+        "operationId": "replan_task_api_v1_tasks__task_id__replan_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationPlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationPlan"
                 }
               }
             }
@@ -6933,6 +7158,60 @@
         ],
         "title": "PlanStep"
       },
+      "PlanStepCreate": {
+        "properties": {
+          "actionType": {
+            "type": "string",
+            "title": "Actiontype"
+          },
+          "target": {
+            "type": "object",
+            "title": "Target"
+          },
+          "params": {
+            "type": "object",
+            "title": "Params"
+          },
+          "dependsOn": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependson"
+          },
+          "successCondition": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successcondition"
+          },
+          "failurePolicy": {
+            "type": "string",
+            "title": "Failurepolicy",
+            "default": "surface_to_operator"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "title": "Timeoutms",
+            "default": 60000
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "Pending"
+          }
+        },
+        "type": "object",
+        "required": [
+          "actionType"
+        ],
+        "title": "PlanStepCreate"
+      },
       "RobotConfig": {
         "properties": {
           "robotCode": {
@@ -8008,6 +8287,43 @@
         ],
         "title": "SimulationPlan"
       },
+      "SimulationPlanCreate": {
+        "properties": {
+          "strategy": {
+            "type": "string",
+            "title": "Strategy",
+            "default": "manual"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/PlanStepCreate"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Steps"
+          },
+          "dependencies": {
+            "type": "object",
+            "title": "Dependencies"
+          },
+          "assumptions": {
+            "type": "object",
+            "title": "Assumptions"
+          },
+          "generatedBy": {
+            "type": "string",
+            "title": "Generatedby",
+            "default": "simulation-console"
+          },
+          "activate": {
+            "type": "boolean",
+            "title": "Activate",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "SimulationPlanCreate"
+      },
       "SimulationRun": {
         "properties": {
           "runId": {
@@ -8682,6 +8998,320 @@
         },
         "type": "object",
         "title": "TargetRegistryItemUpdate"
+      },
+      "TaskChain": {
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "title": "Chainid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "triggerPolicy": {
+            "type": "string",
+            "title": "Triggerpolicy"
+          },
+          "robotStrategy": {
+            "type": "string",
+            "title": "Robotstrategy"
+          },
+          "failurePolicy": {
+            "type": "string",
+            "title": "Failurepolicy"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskChainItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chainId",
+          "runId",
+          "name",
+          "mode",
+          "triggerPolicy",
+          "robotStrategy",
+          "failurePolicy",
+          "priority",
+          "status",
+          "createdBy",
+          "createdAt"
+        ],
+        "title": "TaskChain"
+      },
+      "TaskChainCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "serial",
+              "parallel",
+              "mixed"
+            ],
+            "title": "Mode",
+            "default": "serial"
+          },
+          "triggerPolicy": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual_confirm",
+              "event_driven"
+            ],
+            "title": "Triggerpolicy",
+            "default": "auto"
+          },
+          "robotStrategy": {
+            "type": "string",
+            "enum": [
+              "specified",
+              "idle_first",
+              "nearest",
+              "lowest_load"
+            ],
+            "title": "Robotstrategy",
+            "default": "specified"
+          },
+          "failurePolicy": {
+            "type": "string",
+            "enum": [
+              "stop_chain",
+              "skip_task",
+              "retry",
+              "replan",
+              "switch_robot"
+            ],
+            "title": "Failurepolicy",
+            "default": "stop_chain"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 5
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskChainTaskCreate"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Tasks"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby",
+            "default": "simulation-console"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "TaskChainCreate"
+      },
+      "TaskChainItem": {
+        "properties": {
+          "chainId": {
+            "type": "string",
+            "title": "Chainid"
+          },
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "dependsOn": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependson"
+          },
+          "triggerCondition": {
+            "type": "string",
+            "title": "Triggercondition",
+            "default": "previous_succeeded"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "Pending"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimulationTask"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "chainId",
+          "runId",
+          "taskId",
+          "sequence"
+        ],
+        "title": "TaskChainItem"
+      },
+      "TaskChainTaskCreate": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "input": {
+            "type": "object",
+            "title": "Input"
+          },
+          "constraints": {
+            "type": "object",
+            "title": "Constraints"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "expectedOutcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedoutcome"
+          },
+          "dependsOn": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dependson"
+          },
+          "triggerCondition": {
+            "type": "string",
+            "title": "Triggercondition",
+            "default": "previous_succeeded"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal"
+        ],
+        "title": "TaskChainTaskCreate"
       },
       "TaskFromTemplateCreate": {
         "properties": {

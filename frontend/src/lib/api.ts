@@ -18,10 +18,12 @@ import type {
   ScenarioSummary,
   ScenarioValidationResponse,
   SimulationAction,
+  SimulationPlan,
   SimulationRun,
   SimulationTask,
   Snapshot,
   SiteMap,
+  TaskChain,
   TaskTemplate,
   RunMessageMetrics,
   TraceGraph,
@@ -276,8 +278,68 @@ export function createSimulationTasksBatch(
   });
 }
 
+export function createTaskChain(
+  runId: string,
+  payload: {
+    name: string;
+    description?: string | null;
+    mode?: "serial" | "parallel" | "mixed";
+    triggerPolicy?: "auto" | "manual_confirm" | "event_driven";
+    robotStrategy?: "specified" | "idle_first" | "nearest" | "lowest_load";
+    failurePolicy?: "stop_chain" | "skip_task" | "retry" | "replan" | "switch_robot";
+    priority?: number;
+    tasks: Array<{
+      goal: string;
+      input?: Record<string, unknown>;
+      constraints?: Record<string, unknown>;
+      priority?: number;
+      expectedOutcome?: string | null;
+      dependsOn?: string[];
+      triggerCondition?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    metadata?: Record<string, unknown>;
+    createdBy?: string;
+  }
+) {
+  return request<TaskChain>(`/api/v1/simulation-runs/${runId}/task-chains`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getTaskChains(runId: string) {
+  return request<TaskChain[]>(`/api/v1/simulation-runs/${runId}/task-chains`);
+}
+
 export function getSimulationTasks(runId: string) {
   return request<SimulationTask[]>(`/api/v1/simulation-runs/${runId}/tasks`);
+}
+
+export function createTaskPlan(
+  taskId: string,
+  payload: {
+    strategy?: string;
+    generatedBy?: string;
+    activate?: boolean;
+    dependencies?: Record<string, unknown>;
+    assumptions?: Record<string, unknown>;
+    steps: Array<{
+      actionType: string;
+      target?: Record<string, unknown>;
+      params?: Record<string, unknown>;
+      dependsOn?: string[];
+      successCondition?: string | null;
+      failurePolicy?: string;
+      timeoutMs?: number;
+      status?: string;
+    }>;
+  }
+) {
+  return request<SimulationPlan>(`/api/v1/tasks/${encodeURIComponent(taskId)}/plans`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function createSimulationAction(payload: {

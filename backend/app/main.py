@@ -50,12 +50,16 @@ from .schemas import (
     SimulationAction,
     SimulationEventCreate,
     SimulationEventRecoveryCreate,
+    SimulationPlan,
+    SimulationPlanCreate,
     SimulationRun,
     SimulationRunCreate,
     SimulationTask,
     SimulationTaskCreate,
     Snapshot,
     SnapshotCreate,
+    TaskChain,
+    TaskChainCreate,
     TargetRegistryItem,
     TargetRegistryItemCreate,
     TargetRegistryItemUpdate,
@@ -856,6 +860,33 @@ def create_simulation_tasks_batch(run_id: str, request: BatchTaskCreate) -> Batc
     return response
 
 
+@app.post("/api/v1/simulation-runs/{run_id}/task-chains", response_model=TaskChain)
+def create_simulation_task_chain(run_id: str, request: TaskChainCreate) -> TaskChain:
+    if not hasattr(store, "create_task_chain"):
+        raise HTTPException(status_code=501, detail="task chain creation requires database store")
+    chain = store.create_task_chain(run_id, request)
+    if chain is None:
+        raise HTTPException(status_code=404, detail="simulation run not found")
+    return chain
+
+
+@app.get("/api/v1/simulation-runs/{run_id}/task-chains", response_model=list[TaskChain])
+def list_simulation_task_chains(run_id: str) -> list[TaskChain]:
+    if not hasattr(store, "list_task_chains"):
+        raise HTTPException(status_code=501, detail="task chain listing requires database store")
+    return store.list_task_chains(run_id)
+
+
+@app.get("/api/v1/task-chains/{chain_id}", response_model=TaskChain)
+def get_simulation_task_chain(chain_id: str) -> TaskChain:
+    if not hasattr(store, "get_task_chain"):
+        raise HTTPException(status_code=501, detail="task chain lookup requires database store")
+    chain = store.get_task_chain(chain_id)
+    if chain is None:
+        raise HTTPException(status_code=404, detail="task chain not found")
+    return chain
+
+
 @app.get("/api/v1/simulation-runs/{run_id}/tasks", response_model=list[SimulationTask])
 def list_simulation_run_tasks(run_id: str) -> list[SimulationTask]:
     return store.list_run_tasks(run_id)
@@ -872,6 +903,21 @@ def get_task(task_id: str) -> dict[str, Any]:
 @app.get("/api/v1/tasks/{task_id}/plans")
 def list_task_plans(task_id: str) -> list[dict]:
     return [plan.model_dump() for plan in store.list_task_plans(task_id)]
+
+
+@app.post("/api/v1/tasks/{task_id}/plans", response_model=SimulationPlan)
+def create_task_plan(task_id: str, request: SimulationPlanCreate) -> SimulationPlan:
+    if not hasattr(store, "create_task_plan"):
+        raise HTTPException(status_code=501, detail="manual plan creation requires database store")
+    plan = store.create_task_plan(task_id, request)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return plan
+
+
+@app.post("/api/v1/tasks/{task_id}/replan", response_model=SimulationPlan)
+def replan_task(task_id: str, request: SimulationPlanCreate) -> SimulationPlan:
+    return create_task_plan(task_id, request)
 
 
 @app.get("/api/v1/tasks/{task_id}/trace", response_model=TraceResponse)

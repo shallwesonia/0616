@@ -706,7 +706,7 @@ class JsonStore:
         if target.pose:
             pose = target.pose.model_dump()
             if command == "goto_pose":
-                normalized = {**pose, **normalized}
+                normalized = {**normalized, **pose}
             else:
                 normalized["targetPose"] = pose
         return validate_action_params(command, normalized)

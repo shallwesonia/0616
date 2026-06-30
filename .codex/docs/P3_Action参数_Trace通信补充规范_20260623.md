@@ -93,9 +93,11 @@ inspectionPoint
 ```
 
 约束：
-- `goto_pose` 使用坐标 `x/y/z/yaw/speed/tolerance`，不使用 `targetId` 表示目标。
+- `goto_pose` 支持两种目标来源：手动坐标 `x/y/z/yaw/speed/tolerance`，或通过 `targetId` 从 Target Registry 解析 `pose`。
+- 当 `goto_pose` 同时存在 `targetId` 和 `x/y/z/yaw` 时，以 Target Registry 中目标对象的 `pose` 为最终坐标来源；`speed/tolerance/pathGroupId/routingMode` 等控制参数继续使用请求参数。
+- 目标对象无 `pose` 时，前端应提示用户使用手动坐标，后端仍需校验 `x/y` 是否存在。
 - `load/unload` 当前继续使用 `stationId` 表示装卸工位。
-- 当前阶段只校验 `targetType` 枚举和值必填，不校验 `targetId` 是否真实存在于地图、货物或资源表。
+- 当前阶段 `targetId` 通过 Target Registry 校验，Trace、Message、Observation 中应保留 `targetId/targetType/targetName` 便于追踪。
 
 ## 3. REST 接口补充
 

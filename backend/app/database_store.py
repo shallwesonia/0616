@@ -27,6 +27,8 @@ from .db_models import (
     SimulationPlanStepRecord,
     SimulationRunRecord,
     SimulationSnapshotRecord,
+    SimulationTaskChainItemRecord,
+    SimulationTaskChainRecord,
     SimulationTaskRecord,
     SimulationTraceHeaderRecord,
     SimulationTraceSpanRecord,
@@ -58,12 +60,16 @@ from .schemas import (
     SimulationEventCreate,
     SimulationEventRecoveryCreate,
     SimulationPlan,
+    SimulationPlanCreate,
     SimulationRun,
     SimulationRunCreate,
     SimulationTask,
     SimulationTaskCreate,
     Snapshot,
     SnapshotCreate,
+    TaskChain,
+    TaskChainCreate,
+    TaskChainItem,
     TaskFromTemplateCreate,
     TaskTemplate,
     TraceResponse,
@@ -680,7 +686,7 @@ class DatabaseStore(JsonStore):
         if target.pose:
             pose = target.pose.model_dump()
             if command == "goto_pose":
-                normalized = {**pose, **normalized}
+                normalized = {**normalized, **pose}
             else:
                 normalized["targetPose"] = pose
         return validate_action_params(command, normalized)
@@ -1258,6 +1264,109 @@ class DatabaseStore(JsonStore):
             tasks=created_tasks,
         )
 
+    def create_task_chain(self, run_id: str, request: TaskChainCreate) -> TaskChain | None:
+        if self.get_simulation_run(run_id) is None:
+            return None
+
+        chain_id = protocol_id("CHAIN")
+        now = now_utc()
+        created_tasks: list[SimulationTask] = []
+        for index, item in enumerate(request.tasks, start=1):
+            constraints = {
+                **item.constraints,
+                "chainId": chain_id,
+                "chainIndex": index,
+                "chainMode": request.mode,
+                "dependsOn": item.dependsOn,
+                "triggerCondition": item.triggerCondition,
+                "robotStrategy": request.robotStrategy,
+                "failurePolicy": request.failurePolicy,
+            }
+            task = self.create_simulation_task(
+                run_id,
+                SimulationTaskCreate(
+                    goal=item.goal,
+                    input={**item.input, "chainId": chain_id, "chainIndex": index},
+                    constraints=constraints,
+                    priority=item.priority if item.priority is not None else request.priority,
+                    expectedOutcome=item.expectedOutcome,
+                    createdBy=request.createdBy,
+                ),
+            )
+            if task is None:
+                return None
+            created_tasks.append(task)
+
+        with self.database.session() as session:
+            row = SimulationTaskChainRecord(
+                workspace_id=self.workspace_id,
+                run_id=run_id,
+                chain_id=chain_id,
+                name=request.name,
+                description=request.description,
+                mode=request.mode,
+                trigger_policy=request.triggerPolicy,
+                robot_strategy=request.robotStrategy,
+                failure_policy=request.failurePolicy,
+                priority=request.priority,
+                status="Ready",
+                metadata_json=request.metadata,
+                created_by=request.createdBy,
+                created_at=now,
+            )
+            session.add(row)
+            for index, task in enumerate(created_tasks, start=1):
+                item = request.tasks[index - 1]
+                session.add(
+                    SimulationTaskChainItemRecord(
+                        workspace_id=self.workspace_id,
+                        run_id=run_id,
+                        chain_id=chain_id,
+                        task_id=task.taskId,
+                        sequence=index,
+                        depends_on_json=item.dependsOn,
+                        trigger_condition=item.triggerCondition,
+                        status="Ready" if index == 1 or request.mode == "parallel" else "Waiting",
+                        metadata_json=item.metadata,
+                    )
+                )
+            self._add_trace_span(
+                session,
+                run_id=run_id,
+                task_id=None,
+                trace_id=run_id,
+                entity_type="TaskChain",
+                entity_id=chain_id,
+                operation="task_chain.created",
+                status="Completed",
+                started_at=now,
+                output_ref=f"tasks:{len(created_tasks)}",
+            )
+            self._refresh_current_state(session, run_id, None, now)
+        return self.get_task_chain(chain_id)
+
+    def list_task_chains(self, run_id: str) -> list[TaskChain]:
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(SimulationTaskChainRecord)
+                .where(
+                    SimulationTaskChainRecord.workspace_id == self.workspace_id,
+                    SimulationTaskChainRecord.run_id == run_id,
+                )
+                .order_by(SimulationTaskChainRecord.created_at.asc())
+            ).all()
+            return [self._task_chain_model(session, row) for row in rows]
+
+    def get_task_chain(self, chain_id: str) -> TaskChain | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(SimulationTaskChainRecord).where(
+                    SimulationTaskChainRecord.workspace_id == self.workspace_id,
+                    SimulationTaskChainRecord.chain_id == chain_id,
+                )
+            )
+            return self._task_chain_model(session, row) if row else None
+
     def get_task(self, task_id: str) -> SimulationTask | None:
         with self.database.session() as session:
             task = session.scalar(
@@ -1298,6 +1407,103 @@ class DatabaseStore(JsonStore):
                 .order_by(SimulationPlanRecord.plan_version.asc())
             ).all()
             return [self._plan_model(row) for row in rows]
+
+    def create_task_plan(self, task_id: str, request: SimulationPlanCreate) -> SimulationPlan | None:
+        now = now_utc()
+        with self.database.session() as session:
+            task = session.scalar(
+                select(SimulationTaskRecord).where(
+                    SimulationTaskRecord.workspace_id == self.workspace_id,
+                    SimulationTaskRecord.task_id == task_id,
+                )
+            )
+            if task is None:
+                return None
+            latest_version = session.scalar(
+                select(func.max(SimulationPlanRecord.plan_version)).where(
+                    SimulationPlanRecord.workspace_id == self.workspace_id,
+                    SimulationPlanRecord.task_id == task_id,
+                )
+            ) or 0
+            if request.activate:
+                existing_active = session.scalars(
+                    select(SimulationPlanRecord).where(
+                        SimulationPlanRecord.workspace_id == self.workspace_id,
+                        SimulationPlanRecord.task_id == task_id,
+                        SimulationPlanRecord.status == "Active",
+                    )
+                ).all()
+                for active in existing_active:
+                    active.status = "Superseded"
+            plan_id = protocol_id("PLAN")
+            steps: list[PlanStep] = []
+            for index, step in enumerate(request.steps, start=1):
+                steps.append(
+                    PlanStep(
+                        planStepId=protocol_id("STEP"),
+                        sequence=index,
+                        actionType=step.actionType,
+                        target=step.target,
+                        params=step.params,
+                        dependsOn=step.dependsOn,
+                        successCondition=step.successCondition,
+                        failurePolicy=step.failurePolicy,
+                        timeoutMs=step.timeoutMs,
+                        status=step.status,
+                    )
+                )
+            row = SimulationPlanRecord(
+                workspace_id=self.workspace_id,
+                run_id=task.run_id,
+                task_id=task.task_id,
+                plan_id=plan_id,
+                trace_id=task.trace_id,
+                plan_version=int(latest_version) + 1,
+                strategy=request.strategy,
+                steps_json=[step.model_dump() for step in steps],
+                dependencies_json=request.dependencies,
+                assumptions_json=request.assumptions,
+                generated_by=request.generatedBy,
+                generation_latency_ms=0,
+                status="Active" if request.activate else "Ready",
+                created_at=now,
+                activated_at=now if request.activate else None,
+            )
+            session.add(row)
+            for step in steps:
+                session.add(
+                    SimulationPlanStepRecord(
+                        workspace_id=self.workspace_id,
+                        run_id=task.run_id,
+                        task_id=task.task_id,
+                        plan_id=plan_id,
+                        plan_step_id=step.planStepId,
+                        sequence=step.sequence,
+                        action_type=step.actionType,
+                        target_json=step.target,
+                        params_json=step.params,
+                        depends_on_json=step.dependsOn,
+                        success_condition=step.successCondition,
+                        failure_policy=step.failurePolicy,
+                        timeout_ms=step.timeoutMs,
+                        status=step.status,
+                    )
+                )
+            self._add_trace_span(
+                session,
+                run_id=task.run_id,
+                task_id=task.task_id,
+                trace_id=task.trace_id,
+                entity_type="Plan",
+                entity_id=plan_id,
+                operation="plan.created",
+                status="Completed",
+                started_at=now,
+                output_ref=f"plan:{plan_id}",
+            )
+            self._refresh_current_state(session, task.run_id, None, now)
+        plans = self.list_task_plans(task_id)
+        return next((plan for plan in plans if plan.planId == plan_id), None)
 
     def create_action(self, request: ActionCreate) -> SimulationAction | None:
         now = now_utc()
@@ -2063,6 +2269,18 @@ class DatabaseStore(JsonStore):
         ]
 
     def _active_plan_row(self, session: Any, task_id: str) -> SimulationPlanRecord | None:
+        active = session.scalar(
+            select(SimulationPlanRecord)
+            .where(
+                SimulationPlanRecord.workspace_id == self.workspace_id,
+                SimulationPlanRecord.task_id == task_id,
+                SimulationPlanRecord.status == "Active",
+            )
+            .order_by(SimulationPlanRecord.plan_version.desc())
+            .limit(1)
+        )
+        if active is not None:
+            return active
         return session.scalar(
             select(SimulationPlanRecord)
             .where(
@@ -2121,6 +2339,59 @@ class DatabaseStore(JsonStore):
             startedAt=iso_datetime(row.started_at) if row.started_at else None,
             finishedAt=iso_datetime(row.finished_at) if row.finished_at else None,
             activePlan=active_plan,
+        )
+
+    def _task_chain_model(self, session: Any, row: SimulationTaskChainRecord) -> TaskChain:
+        item_rows = session.scalars(
+            select(SimulationTaskChainItemRecord)
+            .where(
+                SimulationTaskChainItemRecord.workspace_id == self.workspace_id,
+                SimulationTaskChainItemRecord.chain_id == row.chain_id,
+            )
+            .order_by(SimulationTaskChainItemRecord.sequence.asc())
+        ).all()
+        task_ids = [item.task_id for item in item_rows]
+        tasks_by_id: dict[str, SimulationTask] = {}
+        if task_ids:
+            task_rows = session.scalars(
+                select(SimulationTaskRecord).where(
+                    SimulationTaskRecord.workspace_id == self.workspace_id,
+                    SimulationTaskRecord.task_id.in_(task_ids),
+                )
+            ).all()
+            for task_row in task_rows:
+                plan = self._active_plan_row(session, task_row.task_id)
+                tasks_by_id[task_row.task_id] = self._task_model(task_row, self._plan_model(plan) if plan else None)
+        return TaskChain(
+            chainId=row.chain_id,
+            runId=row.run_id,
+            name=row.name,
+            description=row.description,
+            mode=row.mode,
+            triggerPolicy=row.trigger_policy,
+            robotStrategy=row.robot_strategy,
+            failurePolicy=row.failure_policy,
+            priority=row.priority,
+            status=row.status,
+            metadata=row.metadata_json,
+            createdBy=row.created_by,
+            createdAt=iso_datetime(row.created_at),
+            startedAt=iso_datetime(row.started_at) if row.started_at else None,
+            finishedAt=iso_datetime(row.finished_at) if row.finished_at else None,
+            items=[
+                TaskChainItem(
+                    chainId=item.chain_id,
+                    runId=item.run_id,
+                    taskId=item.task_id,
+                    sequence=item.sequence,
+                    dependsOn=item.depends_on_json,
+                    triggerCondition=item.trigger_condition,
+                    status=item.status,
+                    metadata=item.metadata_json,
+                    task=tasks_by_id.get(item.task_id),
+                )
+                for item in item_rows
+            ],
         )
 
     def _action_row(self, session: Any, action_id: str) -> SimulationActionRecord | None:
