@@ -381,6 +381,89 @@ def default_targets_from_map(map_data: dict[str, Any] | SiteMap, now: str | None
     return list(deduped.values())
 
 
+def map_source_targets_from_map(map_data: dict[str, Any] | SiteMap, now: str | None = None) -> list[dict[str, Any]]:
+    return [target for target in default_targets_from_map(map_data, now) if target.get("metadata", {}).get("source") == "map"]
+
+
+def sync_map_targets_in_state(state: dict[str, Any], map_data: dict[str, Any] | SiteMap) -> dict[str, int]:
+    timestamp = utc_now()
+    map_json = map_with_default_path_groups(map_data)
+    map_id = str(map_json.get("id") or "site-a")
+    desired_targets = map_source_targets_from_map(map_json, timestamp)
+    desired_ids = {target["targetId"] for target in desired_targets}
+    targets = state.setdefault("targets", default_targets_from_map(map_json, timestamp))
+    existing_by_id = {target.get("targetId"): target for target in targets}
+    summary = {"created": 0, "updated": 0, "inactivated": 0}
+
+    for target in desired_targets:
+        existing = existing_by_id.get(target["targetId"])
+        if existing is None:
+            targets.append(target)
+            existing_by_id[target["targetId"]] = target
+            summary["created"] += 1
+            continue
+        created_at = existing.get("createdAt") or target["createdAt"]
+        if any(existing.get(key) != target.get(key) for key in ("targetType", "displayName", "mapId", "pose", "geometryRef", "metadata", "status", "version")):
+            summary["updated"] += 1
+        existing.update(target)
+        existing["createdAt"] = created_at
+        existing["updatedAt"] = timestamp
+
+    for target in targets:
+        if target.get("targetId") in desired_ids:
+            continue
+        if target.get("mapId") != map_id or target.get("metadata", {}).get("source") != "map":
+            continue
+        if target.get("status") != "inactive":
+            target["status"] = "inactive"
+            target["updatedAt"] = timestamp
+            summary["inactivated"] += 1
+
+    return summary
+
+
+def target_registry_sync_issues(map_data: dict[str, Any] | SiteMap, targets: list[TargetRegistryItem] | list[dict[str, Any]]) -> list[str]:
+    map_json = map_with_default_path_groups(map_data)
+    map_id = str(map_json.get("id") or "site-a")
+    map_version = str(map_json.get("configVersion") or "v1")
+    desired_by_id = {target["targetId"]: target for target in map_source_targets_from_map(map_json)}
+    desired_ids = set(desired_by_id)
+    normalized_targets = [
+        target.model_dump() if isinstance(target, TargetRegistryItem) else target
+        for target in targets
+    ]
+    map_source_targets = [
+        target
+        for target in normalized_targets
+        if target.get("mapId") == map_id and target.get("metadata", {}).get("source") == "map"
+    ]
+    registered_map_targets = {target.get("targetId"): target for target in map_source_targets}
+    missing_ids = sorted(desired_ids - set(registered_map_targets))
+    out_of_sync_ids = sorted(
+        target_id
+        for target_id, target in registered_map_targets.items()
+        if target_id in desired_ids
+        and (
+            target.get("version") != map_version
+            or target.get("status") != desired_by_id[target_id].get("status")
+        )
+    )
+    stale_ids = sorted(
+        target.get("targetId")
+        for target in map_source_targets
+        if target.get("status") == "active"
+        and (target.get("targetId") not in desired_ids or target.get("version") != map_version)
+    )
+    issues: list[str] = []
+    if missing_ids:
+        issues.append(f"target registry missing current map targets: {', '.join(missing_ids[:5])}")
+    if out_of_sync_ids:
+        issues.append(f"target registry has out-of-sync current map targets: {', '.join(out_of_sync_ids[:5])}")
+    if stale_ids:
+        issues.append(f"target registry has stale active map targets: {', '.join(stale_ids[:5])}")
+    return issues
+
+
 def default_robot_configs(now: str | None = None) -> list[dict[str, Any]]:
     timestamp = now or utc_now()
     return [
@@ -593,6 +676,7 @@ class JsonStore:
         next_map = deepcopy(draft["map"])
         next_map["configVersion"] = f"v{utc_now().replace(':', '').replace('-', '')[:15]}"
         state["map"] = next_map
+        sync_summary = sync_map_targets_in_state(state, next_map)
         state["drafts"][draft_id]["status"] = "published"
         state["drafts"][draft_id]["publishedAt"] = utc_now()
         self.append_audit_to_state(
@@ -600,7 +684,7 @@ class JsonStore:
             "map.draft.published",
             "map",
             next_map["id"],
-            after={"draftId": draft_id, "configVersion": next_map["configVersion"]},
+            after={"draftId": draft_id, "configVersion": next_map["configVersion"], "targetSync": sync_summary},
         )
         self.write(state)
         return SiteMap.model_validate(next_map)

@@ -258,7 +258,31 @@ export function SimulationDashboard() {
     (action) => !effectiveRobotCode || action.robotCode === effectiveRobotCode
   );
   const visibleObservations = observations.filter((observation) => !effectiveRobotCode || observation.robotCode === effectiveRobotCode);
-  const targetOptions = targets.filter((target) => target.status === "active");
+  const currentMapTargetIds = useMemo(() => {
+    const map = selectedScenario?.map;
+    return new Set([
+      ...(map?.objects ?? []).map((item) => item.id),
+      ...(map?.pathEdges ?? []).map((item) => item.id),
+      ...(map?.pathGroups ?? []).map((item) => item.id)
+    ]);
+  }, [selectedScenario?.map]);
+  const targetOptions = useMemo(() => {
+    return targets.filter((target) => {
+      if (target.status !== "active") {
+        return false;
+      }
+      if (selectedScenario?.siteMapId && target.mapId !== selectedScenario.siteMapId) {
+        return false;
+      }
+      if (target.metadata?.source !== "map") {
+        return true;
+      }
+      if (selectedScenario?.siteMapVersion && target.version !== selectedScenario.siteMapVersion) {
+        return false;
+      }
+      return currentMapTargetIds.has(target.targetId) || Boolean(target.geometryRef && currentMapTargetIds.has(target.geometryRef));
+    });
+  }, [currentMapTargetIds, selectedScenario?.siteMapId, selectedScenario?.siteMapVersion, targets]);
   const poseTargetOptions = targetOptions.filter((target) => Boolean(target.pose));
   const suggestedRobotCode = useMemo(() => nextRobotCode(availableRobotCodes), [availableRobotCodes]);
   const scenarioCheckSummary = useMemo(() => {

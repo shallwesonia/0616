@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
 
 from .database import Database, workspace_id_from_env
 from .db_models import (
@@ -97,7 +98,9 @@ from .store import (
     default_robot_states,
     default_state,
     default_targets_from_map,
+    map_source_targets_from_map,
     map_with_default_path_groups,
+    target_registry_sync_issues,
 )
 
 
@@ -287,6 +290,7 @@ class DatabaseStore(JsonStore):
                 if target.targetId not in existing_target_ids:
                     session.add(self._target_row(target))
                     existing_target_ids.add(target.targetId)
+            self._sync_map_targets(session, target_source_map)
 
             existing_executor_ids = set(
                 session.scalars(
@@ -476,6 +480,7 @@ class DatabaseStore(JsonStore):
                 active_map.updated_at = now_utc()
 
             session.add(self._site_map_row(map_json, status="active"))
+            sync_summary = self._sync_map_targets(session, map_json)
             draft.status = "published"
             draft.published_at = now_utc()
             self._add_audit(
@@ -483,7 +488,7 @@ class DatabaseStore(JsonStore):
                 "map.draft.published",
                 "map",
                 draft.map_id,
-                after={"draftId": draft_id, "configVersion": map_json["configVersion"]},
+                after={"draftId": draft_id, "configVersion": map_json["configVersion"], "targetSync": sync_summary},
             )
             return SiteMap.model_validate(map_json)
 
@@ -1082,6 +1087,13 @@ class DatabaseStore(JsonStore):
             "Map integrity",
             len(map_issues) == 0,
             "map validation passed" if not map_issues else "; ".join(map_issues[:3]),
+        )
+        target_sync_issues = target_registry_sync_issues(scenario.map, self.list_targets(status=None))
+        add_check(
+            "target.registry.sync",
+            "Target Registry sync",
+            len(target_sync_issues) == 0,
+            "target registry matches current map" if not target_sync_issues else "; ".join(target_sync_issues[:3]),
         )
 
         stations = [item for item in scenario.map.objects if item.type == "station"]
@@ -2571,6 +2583,65 @@ class DatabaseStore(JsonStore):
     def _default_robot_code(self) -> str:
         robots = self.robots()
         return robots[0].robotId if robots else "robot-001"
+
+    def _sync_map_targets(self, session: Session, map_data: dict[str, Any] | SiteMap) -> dict[str, int]:
+        now = now_utc()
+        timestamp = iso_datetime(now)
+        map_json = map_with_default_path_groups(map_data)
+        map_id = str(map_json.get("id") or "site-a")
+        desired_targets = [
+            TargetRegistryItem.model_validate(target)
+            for target in map_source_targets_from_map(map_json, timestamp)
+        ]
+        desired_ids = {target.targetId for target in desired_targets}
+        rows = session.scalars(
+            select(TargetRegistryRecord).where(TargetRegistryRecord.workspace_id == self.workspace_id)
+        ).all()
+        existing_by_id = {row.target_id: row for row in rows}
+        summary = {"created": 0, "updated": 0, "inactivated": 0}
+
+        for target in desired_targets:
+            row = existing_by_id.get(target.targetId)
+            target_pose = target.pose.model_dump() if target.pose else None
+            if row is None:
+                session.add(self._target_row(target))
+                summary["created"] += 1
+                continue
+            changed = any(
+                [
+                    row.target_type != target.targetType,
+                    row.display_name != target.displayName,
+                    row.map_id != target.mapId,
+                    row.pose_json != target_pose,
+                    row.geometry_ref != target.geometryRef,
+                    row.metadata_json != target.metadata,
+                    row.status != target.status,
+                    row.version != target.version,
+                ]
+            )
+            row.target_type = target.targetType
+            row.display_name = target.displayName
+            row.map_id = target.mapId
+            row.pose_json = target_pose
+            row.geometry_ref = target.geometryRef
+            row.metadata_json = target.metadata
+            row.status = target.status
+            row.version = target.version
+            row.updated_at = now
+            if changed:
+                summary["updated"] += 1
+
+        for row in rows:
+            if row.target_id in desired_ids:
+                continue
+            if row.map_id != map_id or (row.metadata_json or {}).get("source") != "map":
+                continue
+            if row.status != "inactive":
+                row.status = "inactive"
+                row.updated_at = now
+                summary["inactivated"] += 1
+
+        return summary
 
     def _target_row(self, target: TargetRegistryItem) -> TargetRegistryRecord:
         return TargetRegistryRecord(

@@ -108,6 +108,38 @@ def test_database_store_seeds_and_publishes_map(tmp_path):
     assert health["draftCount"] == 1
 
 
+def test_publish_draft_syncs_target_registry_to_current_map(tmp_path):
+    store = create_store(tmp_path)
+    current_map = store.current_map()
+    updated_map = current_map.model_copy(deep=True)
+    source_station = next(item for item in updated_map.objects if item.id == "station-1")
+    new_station = source_station.model_copy(
+        update={"id": "station-new", "name": "New Station", "x": 880, "y": 260}
+    )
+    updated_map.objects = [item for item in updated_map.objects if item.id != "station-1"]
+    updated_map.objects.append(new_station)
+
+    draft_id = store.save_draft(updated_map)
+    published = store.publish_draft(draft_id)
+
+    assert published is not None
+    expected_map_target_ids = {
+        *{item.id for item in published.objects},
+        *{edge.id for edge in published.pathEdges},
+        *{group.id for group in published.pathGroups},
+    }
+    active_map_targets = [
+        target
+        for target in store.list_targets(status="active")
+        if target.metadata.get("source") == "map"
+    ]
+    assert {target.targetId for target in active_map_targets} == expected_map_target_ids
+    assert all(target.version == published.configVersion for target in active_map_targets)
+    assert store.get_target("station-1").status == "inactive"
+    assert store.get_target("station-new").pose.x == 880
+    assert store.validate_scenario("default-site-a").ok
+
+
 def test_map_validation_rejects_invalid_path_group_bindings(tmp_path):
     store = create_store(tmp_path)
     invalid_map = store.current_map().model_copy(deep=True)
