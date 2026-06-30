@@ -44,6 +44,423 @@
         }
       }
     },
+    "/api/v1/integrations/hub/status": {
+      "get": {
+        "summary": "Get Hub Integration Status",
+        "operationId": "get_hub_integration_status_api_v1_integrations_hub_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubIntegrationStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/mqtt-subscription": {
+      "get": {
+        "summary": "Get Hub Mqtt Subscription",
+        "operationId": "get_hub_mqtt_subscription_api_v1_integrations_hub_mqtt_subscription_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Hub Mqtt Subscription Api V1 Integrations Hub Mqtt Subscription Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/mappings": {
+      "get": {
+        "summary": "List Hub Mappings",
+        "operationId": "list_hub_mappings_api_v1_integrations_hub_mappings_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HubIdMapping"
+                  },
+                  "title": "Response List Hub Mappings Api V1 Integrations Hub Mappings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/scenes/{scenario_id}": {
+      "post": {
+        "summary": "Sync Hub Scene",
+        "operationId": "sync_hub_scene_api_v1_integrations_hub_sync_scenes__scenario_id__post",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/entities/{scenario_id}": {
+      "post": {
+        "summary": "Sync Hub Entities",
+        "operationId": "sync_hub_entities_api_v1_integrations_hub_sync_entities__scenario_id__post",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/runs/{run_id}": {
+      "post": {
+        "summary": "Sync Hub Run Graph",
+        "operationId": "sync_hub_run_graph_api_v1_integrations_hub_sync_runs__run_id__post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/tasks/{task_id}": {
+      "post": {
+        "summary": "Sync Hub Task",
+        "operationId": "sync_hub_task_api_v1_integrations_hub_sync_tasks__task_id__post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/plans/{plan_id}": {
+      "post": {
+        "summary": "Sync Hub Plan",
+        "operationId": "sync_hub_plan_api_v1_integrations_hub_sync_plans__plan_id__post",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/hub/sync/actions/{action_id}": {
+      "post": {
+        "summary": "Sync Hub Action",
+        "operationId": "sync_hub_action_api_v1_integrations_hub_sync_actions__action_id__post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/HubSyncRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubSyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/maps/current": {
       "get": {
         "summary": "Get Current Map",
@@ -5965,6 +6382,151 @@
         ],
         "title": "HubExecutorResultSubmit"
       },
+      "HubIdMapping": {
+        "properties": {
+          "localType": {
+            "type": "string",
+            "title": "Localtype"
+          },
+          "localId": {
+            "type": "string",
+            "title": "Localid"
+          },
+          "hubType": {
+            "type": "string",
+            "title": "Hubtype"
+          },
+          "hubId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hubid"
+          },
+          "externalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Externalid"
+          },
+          "externalTraceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Externaltraceid"
+          },
+          "hubTraceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hubtraceid"
+          },
+          "syncStatus": {
+            "type": "string",
+            "title": "Syncstatus"
+          },
+          "lastError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasterror"
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "localType",
+          "localId",
+          "hubType",
+          "syncStatus",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "HubIdMapping"
+      },
+      "HubIntegrationStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "baseUrl": {
+            "type": "string",
+            "title": "Baseurl"
+          },
+          "healthUrl": {
+            "type": "string",
+            "title": "Healthurl"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "disabled",
+              "error"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "mqttSubscription": {
+            "type": "object",
+            "title": "Mqttsubscription"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "baseUrl",
+          "healthUrl",
+          "status"
+        ],
+        "title": "HubIntegrationStatus"
+      },
       "HubMessageQuery": {
         "properties": {
           "source": {
@@ -6399,6 +6961,126 @@
           "scene_id"
         ],
         "title": "HubSnapshotCreate"
+      },
+      "HubSyncItem": {
+        "properties": {
+          "localType": {
+            "type": "string",
+            "title": "Localtype"
+          },
+          "localId": {
+            "type": "string",
+            "title": "Localid"
+          },
+          "hubType": {
+            "type": "string",
+            "title": "Hubtype"
+          },
+          "hubId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hubid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "synced",
+              "reused",
+              "skipped",
+              "error"
+            ],
+            "title": "Status"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "localType",
+          "localId",
+          "hubType",
+          "status"
+        ],
+        "title": "HubSyncItem"
+      },
+      "HubSyncRequest": {
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "includeEntities": {
+            "type": "boolean",
+            "title": "Includeentities",
+            "default": true
+          },
+          "includeRunGraph": {
+            "type": "boolean",
+            "title": "Includerungraph",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "HubSyncRequest"
+      },
+      "HubSyncResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HubSyncItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/HubIdMapping"
+            },
+            "type": "array",
+            "title": "Mappings"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "stage"
+        ],
+        "title": "HubSyncResponse"
       },
       "HubTaskCreate": {
         "properties": {

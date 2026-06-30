@@ -8,8 +8,47 @@ from fastapi.testclient import TestClient
 
 import backend.app.main as main_module
 from backend.app.database_store import DatabaseStore
+from backend.app.hub_client import HubIntegrationService
 from backend.app.main import app
-from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, action_command_names
+from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, ActionCreate, SimulationRunCreate, SimulationTaskCreate, action_command_names
+
+
+class FakeHubClient:
+    enabled = True
+    base_url = "http://hub.test/api/v1"
+    health_url = "http://hub.test/health"
+
+    def __init__(self):
+        self.counter = 0
+        self.requests = []
+
+    def request(self, method: str, path: str, payload=None):
+        self.requests.append((method, path, payload))
+        self.counter += 1
+        hub_id = UUID(int=self.counter)
+        if method == "GET" and path == "/scenes":
+            return []
+        if method == "GET" and path.startswith("/entities"):
+            return []
+        if method == "GET" and path.startswith("/runs/"):
+            return {"id": str(hub_id), "run_id": path.rsplit("/", 1)[-1]}
+        if method == "POST" and path == "/scenes":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path == "/entities":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path == "/runs":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path == "/tasks":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path == "/traces":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path.startswith("/traces/") and path.endswith("/events"):
+            return {"id": str(hub_id), "trace_id": path.split("/")[2], **payload}
+        if method == "POST" and path == "/plans":
+            return {"id": str(hub_id), **payload}
+        if method == "POST" and path == "/actions":
+            return {"id": str(hub_id), **payload}
+        raise AssertionError(f"unexpected Hub request: {method} {path}")
 
 
 def test_health_has_component_statuses():
@@ -239,6 +278,76 @@ def test_connections_contract_has_lan_protocols():
         assert payload["services"]["mqtt"]["supportedCommands"] == action_command_names()
         assert "action.progress" in payload["services"]["mqtt"]["resultEvents"]
         assert "fault.recovered" in payload["services"]["mqtt"]["resultEvents"]
+
+
+def test_hub_integration_status_exposes_mqtt_subscription(monkeypatch):
+    monkeypatch.setenv("HUB_SYNC_ENABLED", "false")
+    with TestClient(app) as client:
+        response = client.get("/api/v1/integrations/hub/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "disabled"
+        assert payload["mqttSubscription"]["topics"][0]["topic"] == "factory/dogs/+/result"
+
+
+def test_hub_sync_run_graph_creates_uuid_mappings(tmp_path):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-sync.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000093"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    run = test_store.create_simulation_run(SimulationRunCreate(scenarioId="default-site-a", name="Hub sync"))
+    task = test_store.create_simulation_task(
+        run.runId,
+        SimulationTaskCreate(
+            goal="Sync task",
+            input={"command": "goto_pose", "target": {"x": 760, "y": 420, "z": 0, "yaw": 0}},
+            constraints={},
+            priority=5,
+            expectedOutcome="synced",
+            createdBy="test",
+        ),
+    )
+    assert task is not None
+    action = test_store.create_action(
+        ActionCreate(
+            runId=run.runId,
+            taskId=task.taskId,
+            planId=task.activePlan.planId,
+            planStepId=task.activePlan.steps[0].planStepId,
+            robotCode="robot-001",
+            command="goto_pose",
+            params={"x": 760, "y": 420, "z": 0, "yaw": 0},
+            timeoutMs=60000,
+            operatorId="test",
+        ),
+    )
+    assert action is not None
+
+    fake_hub = FakeHubClient()
+    response = HubIntegrationService(test_store, fake_hub).sync_run_graph(run.runId)
+    assert response.ok is True
+    mapping_types = {(item.localType, item.hubType) for item in response.mappings}
+    assert ("scenario", "scene") in mapping_types
+    assert ("robot", "entity") in mapping_types
+    assert ("target", "entity") in mapping_types
+    assert ("run", "run") in mapping_types
+    assert ("task", "task") in mapping_types
+    assert ("plan", "plan") in mapping_types
+    assert ("action", "action") in mapping_types
+    assert ("trace", "trace") in mapping_types
+
+    trace_mapping = test_store.get_hub_mapping("trace", task.traceId, "trace")
+    assert trace_mapping is not None
+    assert UUID(trace_mapping.hubId)
+    assert trace_mapping.externalTraceId == task.traceId
+    assert trace_mapping.hubTraceId == trace_mapping.hubId
+    action_payloads = [payload for method, path, payload in fake_hub.requests if method == "POST" and path == "/actions"]
+    assert action_payloads[0]["metadata"]["externalId"] == action.actionId
+    assert UUID(action_payloads[0]["task_id"])
+    assert UUID(action_payloads[0]["plan_id"])
+    assert UUID(action_payloads[0]["entity_id"])
 
 
 def test_action_command_specs_expose_standard_params():

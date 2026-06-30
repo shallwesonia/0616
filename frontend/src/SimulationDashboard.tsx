@@ -47,6 +47,8 @@ import {
   getActionTrace,
   getCurrentState,
   getExecutors,
+  getHubIntegrationStatus,
+  getHubMappings,
   getRobotConfigs,
   getRunMessages,
   getRunMessageMetrics,
@@ -70,12 +72,18 @@ import {
   scheduleNextPlanStep,
   startSimulationRun,
   stopSimulationRun,
+  syncHubEntities,
+  syncHubRunGraph,
+  syncHubScene,
   validateScenario
 } from "./lib/api";
 import type {
   ActionCommandSpec,
   CurrentState,
   ExecutorInstance,
+  HubIdMapping,
+  HubIntegrationStatus,
+  HubSyncResponse,
   MapObject,
   MessageRecord,
   Observation,
@@ -159,6 +167,10 @@ export function SimulationDashboard() {
   const [trace, setTrace] = useState<TraceResponse | null>(null);
   const [traceGraph, setTraceGraph] = useState<TraceGraph | null>(null);
   const [messageMetrics, setMessageMetrics] = useState<RunMessageMetrics | null>(null);
+  const [hubStatus, setHubStatus] = useState<HubIntegrationStatus | null>(null);
+  const [hubMappings, setHubMappings] = useState<HubIdMapping[]>([]);
+  const [hubSyncResult, setHubSyncResult] = useState<HubSyncResponse | null>(null);
+  const [hubSyncing, setHubSyncing] = useState(false);
   const [scenarioValidation, setScenarioValidation] = useState<ScenarioValidationResponse | null>(null);
   const [socketState, setSocketState] = useState<"idle" | "open" | "fallback">("idle");
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -257,16 +269,25 @@ export function SimulationDashboard() {
       failed: checks.filter((check) => check.status === "failed").length
     };
   }, [scenarioValidation]);
+  const hubMappingCounts = useMemo(() => {
+    return hubMappings.reduce<Record<string, number>>((counts, mapping) => {
+      counts[mapping.hubType] = (counts[mapping.hubType] ?? 0) + 1;
+      return counts;
+    }, {});
+  }, [hubMappings]);
+  const latestHubMappings = hubMappings.slice(0, 5);
 
   async function bootstrap() {
-    const [nextScenarios, nextTemplates, nextSpecs, nextRuns, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
+    const [nextScenarios, nextTemplates, nextSpecs, nextRuns, nextTargets, nextRobotConfigs, nextExecutors, nextHubStatus, nextHubMappings] = await Promise.all([
       getScenarios(),
       getTaskTemplates(),
       getActionCommandSpecs(),
       getSimulationRuns(),
       getTargets(),
       getRobotConfigs(),
-      getExecutors()
+      getExecutors(),
+      getHubIntegrationStatus().catch(() => null),
+      getHubMappings().catch(() => [])
     ]);
     setScenarios(nextScenarios);
     setTemplates(nextTemplates);
@@ -274,6 +295,9 @@ export function SimulationDashboard() {
     setTargets(nextTargets);
     setRobotConfigs(nextRobotConfigs);
     setExecutors(nextExecutors);
+    void refreshHubIntegration();
+    setHubStatus(nextHubStatus);
+    setHubMappings(nextHubMappings);
     setActionParams(defaultActionParams(nextSpecs.find((spec) => spec.command === "goto_pose") ?? nextSpecs[0]));
     setCommand(nextSpecs.find((spec) => spec.command === "goto_pose")?.command ?? nextSpecs[0]?.command ?? "goto_pose");
     setRuns(nextRuns);
@@ -290,6 +314,15 @@ export function SimulationDashboard() {
     setStatus("已连接平台 API");
   }
 
+  async function refreshHubIntegration() {
+    const [nextHubStatus, nextHubMappings] = await Promise.all([
+      getHubIntegrationStatus().catch(() => null),
+      getHubMappings().catch(() => [])
+    ]);
+    setHubStatus(nextHubStatus);
+    setHubMappings(nextHubMappings);
+  }
+
   async function handleValidateScenario(scenarioId = selectedScenarioId, announce = true) {
     try {
       const validation = await validateScenario(scenarioId);
@@ -304,6 +337,57 @@ export function SimulationDashboard() {
         setStatus("场景校验接口暂不可用");
       }
       return null;
+    }
+  }
+
+  async function handleHubSyncScene() {
+    if (!selectedScenarioId) {
+      return;
+    }
+    setHubSyncing(true);
+    try {
+      const response = await syncHubScene(selectedScenarioId);
+      setHubSyncResult(response);
+      await refreshHubIntegration();
+      setStatus(response.ok ? `Hub Scene synced: ${response.items.length}` : `Hub Scene sync failed: ${response.error ?? "unknown"}`);
+    } catch (error) {
+      setStatus(`Hub Scene sync failed: ${error instanceof Error ? error.message : "unknown"}`);
+    } finally {
+      setHubSyncing(false);
+    }
+  }
+
+  async function handleHubSyncEntities() {
+    if (!selectedScenarioId) {
+      return;
+    }
+    setHubSyncing(true);
+    try {
+      const response = await syncHubEntities(selectedScenarioId);
+      setHubSyncResult(response);
+      await refreshHubIntegration();
+      setStatus(response.ok ? `Hub Entities synced: ${response.items.length}` : `Hub Entities sync failed: ${response.error ?? "unknown"}`);
+    } catch (error) {
+      setStatus(`Hub Entities sync failed: ${error instanceof Error ? error.message : "unknown"}`);
+    } finally {
+      setHubSyncing(false);
+    }
+  }
+
+  async function handleHubSyncRunGraph() {
+    if (!run) {
+      return;
+    }
+    setHubSyncing(true);
+    try {
+      const response = await syncHubRunGraph(run.runId);
+      setHubSyncResult(response);
+      await refreshHubIntegration();
+      setStatus(response.ok ? `Hub Run graph synced: ${response.items.length}` : `Hub Run graph sync failed: ${response.error ?? "unknown"}`);
+    } catch (error) {
+      setStatus(`Hub Run graph sync failed: ${error instanceof Error ? error.message : "unknown"}`);
+    } finally {
+      setHubSyncing(false);
     }
   }
 
@@ -1165,6 +1249,62 @@ export function SimulationDashboard() {
                   ))}
                 </div>
               )}
+            </Panel>
+
+            <Panel className="p-4">
+              <PanelTitle icon={Radio} title="Hub 对接" subtitle="Scene / Entity / Run graph 同步" />
+              <div className="mt-4 grid gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={hubStatus?.status === "ok" ? "green" : hubStatus?.status === "disabled" ? "amber" : "red"}>
+                    {hubStatus?.status ?? "unknown"}
+                  </Badge>
+                  <Badge tone={hubStatus?.enabled ? "blue" : "neutral"}>{hubStatus?.enabled ? "enabled" : "disabled"}</Badge>
+                </div>
+                <div className="grid gap-2 text-xs text-neutral-500">
+                  <InfoRow label="Hub API" value={hubStatus?.baseUrl ?? "-"} />
+                  <InfoRow label="Health" value={hubStatus?.healthUrl ?? "-"} />
+                  <InfoRow label="Mappings" value={`${hubMappings.length} total`} />
+                  <InfoRow label="Scene" value={String(hubMappingCounts.scene ?? 0)} />
+                  <InfoRow label="Entity" value={String(hubMappingCounts.entity ?? 0)} />
+                  <InfoRow label="Trace" value={String(hubMappingCounts.trace ?? 0)} />
+                </div>
+                {hubStatus?.error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {hubStatus.error}
+                  </div>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  <Button variant="secondary" disabled={hubSyncing || !selectedScenarioId} onClick={() => void handleHubSyncScene()}>
+                    Scene
+                  </Button>
+                  <Button variant="secondary" disabled={hubSyncing || !selectedScenarioId} onClick={() => void handleHubSyncEntities()}>
+                    Entity
+                  </Button>
+                  <Button disabled={hubSyncing || !run} onClick={() => void handleHubSyncRunGraph()}>
+                    Run
+                  </Button>
+                </div>
+                {hubSyncResult && (
+                  <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{hubSyncResult.stage}</span>
+                      <Badge tone={hubSyncResult.ok ? "green" : "red"}>{hubSyncResult.ok ? "ok" : "failed"}</Badge>
+                    </div>
+                    <div className="mt-2">{hubSyncResult.error ?? `${hubSyncResult.items.length} items`}</div>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {latestHubMappings.map((mapping) => (
+                    <CompactRow
+                      key={`${mapping.localType}-${mapping.localId}-${mapping.hubType}`}
+                      label={`${mapping.localType}:${mapping.localId}`}
+                      value={mapping.hubId ?? mapping.syncStatus}
+                      tone={mapping.syncStatus === "synced" ? "green" : mapping.syncStatus === "skipped" ? "amber" : "neutral"}
+                    />
+                  ))}
+                  {latestHubMappings.length === 0 && <EmptyState text="暂无 Hub 映射" />}
+                </div>
+              </div>
             </Panel>
 
             <Panel className="p-4">

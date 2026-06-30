@@ -508,3 +508,28 @@ class SimulationTraceSpanRecord(Base):
     input_ref: Mapped[str | None] = mapped_column(String(256))
     output_ref: Mapped[str | None] = mapped_column(String(256))
     error_ref: Mapped[str | None] = mapped_column(String(256))
+
+
+class HubIdMappingRecord(Base):
+    __tablename__ = "hub_id_mappings"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "local_type", "local_id", "hub_type", name="uk_hub_id_mappings_local"),
+        Index("idx_hub_id_mappings_hub", "workspace_id", "hub_type", "hub_id"),
+        Index("idx_hub_id_mappings_trace", "workspace_id", "external_trace_id", "hub_trace_id"),
+        {"schema": "integration"},
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    local_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    local_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    hub_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    hub_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    external_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    external_trace_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    hub_trace_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="synced")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)

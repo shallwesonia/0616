@@ -8,6 +8,9 @@ import type {
   BatchTaskResponse,
   ActionCommandSpec,
   HealthResponse,
+  HubIdMapping,
+  HubIntegrationStatus,
+  HubSyncResponse,
   MessageReplayResponse,
   MessageRecord,
   MqttContract,
@@ -62,6 +65,60 @@ export function getConnections() {
 
 export function getMqttContract() {
   return request<MqttContract>("/api/v1/mqtt/contract");
+}
+
+export function getHubIntegrationStatus() {
+  return request<HubIntegrationStatus>("/api/v1/integrations/hub/status");
+}
+
+export function getHubMappings() {
+  return request<HubIdMapping[]>("/api/v1/integrations/hub/mappings");
+}
+
+export function getHubMqttSubscription() {
+  return request<Record<string, unknown>>("/api/v1/integrations/hub/mqtt-subscription");
+}
+
+export function syncHubScene(scenarioId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/scenes/${encodeURIComponent(scenarioId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+}
+
+export function syncHubEntities(scenarioId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/entities/${encodeURIComponent(scenarioId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+}
+
+export function syncHubRunGraph(runId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/runs/${encodeURIComponent(runId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+}
+
+export function syncHubTask(taskId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/tasks/${encodeURIComponent(taskId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+}
+
+export function syncHubPlan(planId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/plans/${encodeURIComponent(planId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+}
+
+export function syncHubAction(actionId: string, force = false) {
+  return request<HubSyncResponse>(`/api/v1/integrations/hub/sync/actions/${encodeURIComponent(actionId)}`, {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
 }
 
 export function saveMapDraft(map: SiteMap) {

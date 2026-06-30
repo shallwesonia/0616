@@ -555,6 +555,47 @@ export interface RunMessageMetrics {
   };
 }
 
+export interface HubIntegrationStatus {
+  enabled: boolean;
+  baseUrl: string;
+  healthUrl: string;
+  status: "ok" | "disabled" | "error";
+  error?: string | null;
+  mqttSubscription: Record<string, unknown>;
+}
+
+export interface HubIdMapping {
+  localType: string;
+  localId: string;
+  hubType: string;
+  hubId?: string | null;
+  externalId?: string | null;
+  externalTraceId?: string | null;
+  hubTraceId?: string | null;
+  syncStatus: string;
+  lastError?: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HubSyncItem {
+  localType: string;
+  localId: string;
+  hubType: string;
+  hubId?: string | null;
+  status: "synced" | "reused" | "skipped" | "error";
+  detail?: string | null;
+}
+
+export interface HubSyncResponse {
+  ok: boolean;
+  stage: string;
+  items: HubSyncItem[];
+  mappings: HubIdMapping[];
+  error?: string | null;
+}
+
 export interface SimulationSnapshot {
   messageId: string;
   type: "simulation.snapshot";

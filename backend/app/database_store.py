@@ -16,6 +16,7 @@ from .db_models import (
     Base,
     ExecutorInstanceRecord,
     ExportJobRecord,
+    HubIdMappingRecord,
     MapDraftRecord,
     MessageRecordRow,
     RobotConfigRecord,
@@ -44,6 +45,7 @@ from .schemas import (
     CurrentState,
     ExecutorInstance,
     ExecutorInstanceCreate,
+    HubIdMapping,
     MessageReplayCreate,
     MessageReplayResponse,
     MessageRecord,
@@ -298,6 +300,109 @@ class DatabaseStore(JsonStore):
                 if executor.executorId not in existing_executor_ids:
                     session.add(self._executor_row(executor))
                     existing_executor_ids.add(executor.executorId)
+
+    def list_hub_mappings(
+        self,
+        local_type: str | None = None,
+        local_id: str | None = None,
+        hub_type: str | None = None,
+        limit: int = 200,
+    ) -> list[HubIdMapping]:
+        query = select(HubIdMappingRecord).where(HubIdMappingRecord.workspace_id == self.workspace_id)
+        if local_type:
+            query = query.where(HubIdMappingRecord.local_type == local_type)
+        if local_id:
+            query = query.where(HubIdMappingRecord.local_id == local_id)
+        if hub_type:
+            query = query.where(HubIdMappingRecord.hub_type == hub_type)
+        with self.database.session() as session:
+            rows = session.scalars(query.order_by(HubIdMappingRecord.updated_at.desc()).limit(limit)).all()
+            return [self._hub_mapping_model(row) for row in rows]
+
+    def get_hub_mapping(
+        self,
+        local_type: str,
+        local_id: str,
+        hub_type: str | None = None,
+    ) -> HubIdMapping | None:
+        query = select(HubIdMappingRecord).where(
+            HubIdMappingRecord.workspace_id == self.workspace_id,
+            HubIdMappingRecord.local_type == local_type,
+            HubIdMappingRecord.local_id == local_id,
+        )
+        if hub_type:
+            query = query.where(HubIdMappingRecord.hub_type == hub_type)
+        with self.database.session() as session:
+            row = session.scalar(query.order_by(HubIdMappingRecord.updated_at.desc()).limit(1))
+            return self._hub_mapping_model(row) if row else None
+
+    def get_hub_mapping_by_hub_id(self, hub_type: str, hub_id: str) -> HubIdMapping | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(HubIdMappingRecord)
+                .where(
+                    HubIdMappingRecord.workspace_id == self.workspace_id,
+                    HubIdMappingRecord.hub_type == hub_type,
+                    HubIdMappingRecord.hub_id == hub_id,
+                )
+                .order_by(HubIdMappingRecord.updated_at.desc())
+                .limit(1)
+            )
+            return self._hub_mapping_model(row) if row else None
+
+    def upsert_hub_mapping(
+        self,
+        local_type: str,
+        local_id: str,
+        hub_type: str,
+        hub_id: str | None,
+        external_id: str | None = None,
+        external_trace_id: str | None = None,
+        hub_trace_id: str | None = None,
+        sync_status: str = "synced",
+        last_error: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> HubIdMapping:
+        now = now_utc()
+        with self.database.session() as session:
+            row = session.scalar(
+                select(HubIdMappingRecord).where(
+                    HubIdMappingRecord.workspace_id == self.workspace_id,
+                    HubIdMappingRecord.local_type == local_type,
+                    HubIdMappingRecord.local_id == local_id,
+                    HubIdMappingRecord.hub_type == hub_type,
+                )
+            )
+            if row is None:
+                row = HubIdMappingRecord(
+                    workspace_id=self.workspace_id,
+                    local_type=local_type,
+                    local_id=local_id,
+                    hub_type=hub_type,
+                    hub_id=hub_id,
+                    external_id=external_id,
+                    external_trace_id=external_trace_id,
+                    hub_trace_id=hub_trace_id,
+                    sync_status=sync_status,
+                    last_error=last_error,
+                    metadata_json=metadata or {},
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.hub_id = hub_id
+                row.external_id = external_id
+                row.external_trace_id = external_trace_id
+                row.hub_trace_id = hub_trace_id
+                row.sync_status = sync_status
+                row.last_error = last_error
+                row.metadata_json = metadata or {}
+                row.updated_at = now
+        mapping = self.get_hub_mapping(local_type, local_id, hub_type)
+        if mapping is None:
+            raise RuntimeError("hub mapping was not persisted")
+        return mapping
 
     def current_map(self) -> SiteMap:
         with self.database.session() as session:
@@ -1407,6 +1512,16 @@ class DatabaseStore(JsonStore):
                 .order_by(SimulationPlanRecord.plan_version.asc())
             ).all()
             return [self._plan_model(row) for row in rows]
+
+    def get_plan(self, plan_id: str) -> SimulationPlan | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(SimulationPlanRecord).where(
+                    SimulationPlanRecord.workspace_id == self.workspace_id,
+                    SimulationPlanRecord.plan_id == plan_id,
+                )
+            )
+            return self._plan_model(row) if row else None
 
     def create_task_plan(self, task_id: str, request: SimulationPlanCreate) -> SimulationPlan | None:
         now = now_utc()
@@ -2977,6 +3092,23 @@ class DatabaseStore(JsonStore):
             inputRef=row.input_ref,
             outputRef=row.output_ref,
             errorRef=row.error_ref,
+        )
+
+    @staticmethod
+    def _hub_mapping_model(row: HubIdMappingRecord) -> HubIdMapping:
+        return HubIdMapping(
+            localType=row.local_type,
+            localId=row.local_id,
+            hubType=row.hub_type,
+            hubId=row.hub_id,
+            externalId=row.external_id,
+            externalTraceId=row.external_trace_id,
+            hubTraceId=row.hub_trace_id,
+            syncStatus=row.sync_status,
+            lastError=row.last_error,
+            metadata=row.metadata_json,
+            createdAt=iso_datetime(row.created_at),
+            updatedAt=iso_datetime(row.updated_at),
         )
 
     def _robot_row(self, robot: RobotState) -> RobotInstanceRecord:

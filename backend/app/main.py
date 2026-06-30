@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from .mqtt_bridge import PlatformMqttBridge
 from .mqtt_contract import MQTT_CONTRACT
+from .hub_client import HubClient, HubIntegrationService, hub_mqtt_subscription_info
 from .schemas import (
     AgentDecision,
     BatchTaskCreate,
@@ -31,6 +32,10 @@ from .schemas import (
     ExportResponse,
     ActionCreate,
     CurrentState,
+    HubIdMapping,
+    HubIntegrationStatus,
+    HubSyncRequest,
+    HubSyncResponse,
     MapImportResponse,
     MapDraftCreate,
     MessageRecord,
@@ -87,6 +92,10 @@ from .hub_compat import (
 
 store = create_store()
 bridge = PlatformMqttBridge(store)
+
+
+def hub_service() -> HubIntegrationService:
+    return HubIntegrationService(store, HubClient.from_env())
 
 
 @asynccontextmanager
@@ -206,6 +215,59 @@ def get_connections() -> dict:
             "robot result topic must be factory/dogs/{robotCode}/result",
         ],
     }
+
+
+@app.get("/api/v1/integrations/hub/status", response_model=HubIntegrationStatus)
+def get_hub_integration_status() -> HubIntegrationStatus:
+    return hub_service().status()
+
+
+@app.get("/api/v1/integrations/hub/mqtt-subscription")
+def get_hub_mqtt_subscription() -> dict[str, Any]:
+    return hub_mqtt_subscription_info()
+
+
+@app.get("/api/v1/integrations/hub/mappings", response_model=list[HubIdMapping])
+def list_hub_mappings(limit: int = 200) -> list[HubIdMapping]:
+    if not hasattr(store, "list_hub_mappings"):
+        raise HTTPException(status_code=501, detail="Hub ID mappings require database store")
+    return store.list_hub_mappings(limit=limit)
+
+
+@app.post("/api/v1/integrations/hub/sync/scenes/{scenario_id}", response_model=HubSyncResponse)
+def sync_hub_scene(scenario_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_scene(scenario_id, force=payload.force)
+
+
+@app.post("/api/v1/integrations/hub/sync/entities/{scenario_id}", response_model=HubSyncResponse)
+def sync_hub_entities(scenario_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_entities(scenario_id, force=payload.force)
+
+
+@app.post("/api/v1/integrations/hub/sync/runs/{run_id}", response_model=HubSyncResponse)
+def sync_hub_run_graph(run_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_run_graph(run_id, force=payload.force)
+
+
+@app.post("/api/v1/integrations/hub/sync/tasks/{task_id}", response_model=HubSyncResponse)
+def sync_hub_task(task_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_task(task_id, force=payload.force)
+
+
+@app.post("/api/v1/integrations/hub/sync/plans/{plan_id}", response_model=HubSyncResponse)
+def sync_hub_plan(plan_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_plan(plan_id, force=payload.force)
+
+
+@app.post("/api/v1/integrations/hub/sync/actions/{action_id}", response_model=HubSyncResponse)
+def sync_hub_action(action_id: str, request: HubSyncRequest | None = None) -> HubSyncResponse:
+    payload = request or HubSyncRequest()
+    return hub_service().sync_action(action_id, force=payload.force)
 
 
 @app.get("/api/v1/maps/current", response_model=SiteMap)

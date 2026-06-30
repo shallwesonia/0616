@@ -52,6 +52,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       REDIS_RUNTIME_TTL_SECONDS: ${REDIS_RUNTIME_TTL_SECONDS:-86400}
       REDIS_MESSAGE_BUFFER_LIMIT: ${REDIS_MESSAGE_BUFFER_LIMIT:-200}
+      HUB_SYNC_ENABLED: ${HUB_SYNC_ENABLED:-true}
+      HUB_BASE_URL: ${HUB_BASE_URL:-http://host.docker.internal:8001/api/v1}
+      HUB_TIMEOUT_SECONDS: ${HUB_TIMEOUT_SECONDS:-5}
     ports:
       - "${LAN_BIND_ADDRESS:-0.0.0.0}:${API_PORT:-8000}:8000"
     volumes:

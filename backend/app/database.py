@@ -9,7 +9,7 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 
-WORKSPACE_SCHEMAS = ("config", "runtime", "message", "audit", "export", "simulation")
+WORKSPACE_SCHEMAS = ("config", "runtime", "message", "audit", "export", "simulation", "integration")
 DEFAULT_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 

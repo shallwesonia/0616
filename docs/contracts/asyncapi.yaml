@@ -276,3 +276,31 @@ x-mqtt-acl:
   agentService:
     subscribe: []
     publish: []
+x-hub-subscription:
+  sceneWorldStateHub:
+    description: Hub MQTT adapter subscribes 0616 robot result events only; Hub is not a command source.
+    brokerHostFromHubContainer: host.docker.internal
+    brokerPort: 18830
+    protocol: MQTT 3.1.1
+    qos: 0
+    clientId: scene-world-state-hub-adapter
+    subscribe:
+      - factory/dogs/+/result
+    eventMapping:
+      Observation:
+        - pose.updated
+        - where.result
+        - action.progress
+      ExecutorResult:
+        - command.accepted
+        - command.rejected
+        - task.succeeded
+        - task.failed
+        - action.succeeded
+        - action.failed
+      Alert:
+        - device.offline
+        - robot.offline
+        - path.blocked
+        - interface.timeout
+        - message.dropped

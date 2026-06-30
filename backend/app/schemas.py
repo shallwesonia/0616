@@ -1002,3 +1002,50 @@ class TraceResponse(BaseModel):
     finishedAt: str | None = None
     durationMs: int | None = None
     spans: list[TraceSpan] = Field(default_factory=list)
+
+
+class HubIntegrationStatus(BaseModel):
+    enabled: bool
+    baseUrl: str
+    healthUrl: str
+    status: Literal["ok", "disabled", "error"]
+    error: str | None = None
+    mqttSubscription: dict[str, Any] = Field(default_factory=dict)
+
+
+class HubIdMapping(BaseModel):
+    localType: str
+    localId: str
+    hubType: str
+    hubId: str | None = None
+    externalId: str | None = None
+    externalTraceId: str | None = None
+    hubTraceId: str | None = None
+    syncStatus: str
+    lastError: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdAt: str
+    updatedAt: str
+
+
+class HubSyncRequest(BaseModel):
+    force: bool = False
+    includeEntities: bool = True
+    includeRunGraph: bool = True
+
+
+class HubSyncItem(BaseModel):
+    localType: str
+    localId: str
+    hubType: str
+    hubId: str | None = None
+    status: Literal["synced", "reused", "skipped", "error"]
+    detail: str | None = None
+
+
+class HubSyncResponse(BaseModel):
+    ok: bool
+    stage: str
+    items: list[HubSyncItem] = Field(default_factory=list)
+    mappings: list[HubIdMapping] = Field(default_factory=list)
+    error: str | None = None

@@ -73,6 +73,44 @@
 
 ## MQTT / AsyncAPI 基线
 
+### Scene / World State Hub 主动同步 API（2026-06-30）
+
+本阶段新增 0616 主动对接外部 `scene-world-state-hub` 的集成层。该层与上方“Hub 兼容 API”不同：
+
+- Hub 兼容 API：外部系统调用 0616，0616 暴露 Hub 风格接口。
+- Hub 主动同步 API：0616 调用外部 Hub，将本地 Scene / Entity / Run / Task / Plan / Action / Trace 同步到 Hub。
+
+新增接口：
+
+| 分类 | 接口 |
+|---|---|
+| Hub 状态 | `GET /api/v1/integrations/hub/status` |
+| Hub MQTT 订阅说明 | `GET /api/v1/integrations/hub/mqtt-subscription` |
+| ID 映射查询 | `GET /api/v1/integrations/hub/mappings` |
+| Scene 同步 | `POST /api/v1/integrations/hub/sync/scenes/{scenario_id}` |
+| Entity 同步 | `POST /api/v1/integrations/hub/sync/entities/{scenario_id}` |
+| Run 全链路同步 | `POST /api/v1/integrations/hub/sync/runs/{run_id}` |
+| Task 同步 | `POST /api/v1/integrations/hub/sync/tasks/{task_id}` |
+| Plan 同步 | `POST /api/v1/integrations/hub/sync/plans/{plan_id}` |
+| Action 同步 | `POST /api/v1/integrations/hub/sync/actions/{action_id}` |
+
+同步规则：
+
+- 0616 本地 ID 不改名，不强制转换为 UUID。
+- Hub 内部对象 ID 以 Hub 返回的 UUID 为准。
+- 本地对象与 Hub UUID 的关系写入 `integration.hub_id_mappings`。
+- 0616 `traceId` 作为 `externalTraceId` 保存，Hub Trace 以 Hub UUID 为主。
+- `where` 是查询指令，Hub 不允许作为 Action 创建；同步时只写 Trace event，并在映射中标记 `skipped`。
+- Hub 不作为第二个指令源。0616 仍通过消息总成下发 MQTT command，Hub 只做世界状态、执行事实和 trace 数据承载。
+
+Docker Compose 默认参数：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `HUB_SYNC_ENABLED` | `true` | 是否启用 0616 主动同步 Hub |
+| `HUB_BASE_URL` | `http://host.docker.internal:8001/api/v1` | Hub API 地址 |
+| `HUB_TIMEOUT_SECONDS` | `5` | Hub REST 调用超时 |
+
 Topic：
 
 | 通道 | Topic |
