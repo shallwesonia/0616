@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 from copy import deepcopy
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import backend.app.main as main_module
 from backend.app.database_store import DatabaseStore
-from backend.app.hub_client import HubIntegrationService
+from backend.app.hub_client import HubClientError, HubIntegrationService, scene_name_for_scenario
 from backend.app.main import app
 from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, ActionCreate, HubIntegrationStatus, SimulationRunCreate, SimulationTaskCreate, action_command_names
 
@@ -21,6 +22,7 @@ class FakeHubClient:
     def __init__(self):
         self.counter = 0
         self.requests = []
+        self.scenes_by_name = {}
 
     def status(self):
         return HubIntegrationStatus(
@@ -35,14 +37,25 @@ class FakeHubClient:
         self.requests.append((method, path, payload))
         self.counter += 1
         hub_id = UUID(int=self.counter)
+        if method == "GET" and path.startswith("/scenes/by-name"):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+            scene_name = query.get("scene_name", [""])[0]
+            if scene_name in self.scenes_by_name:
+                return self.scenes_by_name[scene_name]
+            raise HubClientError(404, "scene not found")
         if method == "GET" and path == "/scenes":
-            return []
+            return list(self.scenes_by_name.values())
         if method == "GET" and path.startswith("/entities"):
             return []
         if method == "GET" and path.startswith("/runs/"):
             return {"id": str(hub_id), "run_id": path.rsplit("/", 1)[-1]}
         if method == "POST" and path == "/scenes":
-            return {"id": str(hub_id), **payload}
+            scene_name = payload["scene_name"]
+            if scene_name in self.scenes_by_name:
+                return self.scenes_by_name[scene_name]
+            scene = {"id": str(hub_id), **payload}
+            self.scenes_by_name[scene_name] = scene
+            return scene
         if method == "POST" and path == "/entities":
             return {"id": str(hub_id), **payload}
         if method == "POST" and path == "/runs":
@@ -155,17 +168,91 @@ def test_publish_map_auto_syncs_hub_scene_and_entities(tmp_path, monkeypatch):
     assert payload["targetSync"]["created"] >= 1
     assert payload["hubSync"]["enabled"] is True
     assert payload["hubSync"]["status"] == "synced"
+    expected_scene_name = f"0616-default-site-a-{payload['map']['configVersion'].removeprefix('v')}"
+    assert payload["hubSync"]["sceneName"] == expected_scene_name
+    assert payload["hubSync"]["hubSceneId"]
+    assert payload["hubSync"]["sceneSyncMode"] == "created"
     assert payload["hubSync"]["scene"]["ok"] is True
     assert payload["hubSync"]["entities"]["ok"] is True
 
+    scene_gets = [item for item in fake_hub.requests if item[0] == "GET" and item[1].startswith("/scenes/by-name")]
     scene_posts = [item for item in fake_hub.requests if item[0] == "POST" and item[1] == "/scenes"]
     entity_posts = [item for item in fake_hub.requests if item[0] == "POST" and item[1] == "/entities"]
+    assert scene_gets
     assert scene_posts
+    assert len(scene_posts) == 1
     assert entity_posts
     latest_scene_payload = scene_posts[0][2]
     assert latest_scene_payload["metadata"]["siteMapVersion"] == payload["map"]["configVersion"]
-    assert latest_scene_payload["scene_name"] == f"0616-default-site-a-{payload['map']['configVersion']}"
+    assert latest_scene_payload["scene_name"] == expected_scene_name
+    assert latest_scene_payload["metadata"]["scene_name"] == expected_scene_name
     assert any(item[2]["entity_name"] == "resource-auto-hub" for item in entity_posts)
+
+    scene_messages = client.get("/api/v1/messages", params={"event": "scene.updated", "limit": 10})
+    assert scene_messages.status_code == 200
+    assert any(message["payload"]["scene_name"] == expected_scene_name for message in scene_messages.json())
+
+
+def test_hub_scene_sync_reuses_existing_scene_by_name(tmp_path):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-scene-reuse.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000094"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    fake_hub = FakeHubClient()
+    scenario = test_store.get_scenario("default-site-a")
+    assert scenario is not None
+    scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
+    fake_hub.scenes_by_name[scene_name] = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "scene_name": scene_name,
+        "description": "existing scene",
+        "map_config": {"existing": True},
+        "metadata": {"externalId": scenario.scenarioId},
+    }
+
+    response = HubIntegrationService(test_store, fake_hub).sync_scene("default-site-a", force=True)
+
+    assert response.ok is True
+    assert response.items[0].status == "reused"
+    assert "v0.1 does not update" in response.items[0].detail
+    assert not any(item[0] == "POST" and item[1] == "/scenes" for item in fake_hub.requests)
+    mapping = test_store.get_hub_mapping("scenario", "default-site-a", "scene")
+    assert mapping is not None
+    assert mapping.hubId == "11111111-1111-1111-1111-111111111111"
+    assert mapping.metadata["sceneSyncMode"] == "reused_existing_no_update"
+
+
+def test_hub_scene_sync_recreates_stale_mapping(tmp_path):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-scene-stale.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000095"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    fake_hub = FakeHubClient()
+    scenario = test_store.get_scenario("default-site-a")
+    assert scenario is not None
+    scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
+    test_store.upsert_hub_mapping(
+        local_type="scenario",
+        local_id="default-site-a",
+        hub_type="scene",
+        hub_id="22222222-2222-2222-2222-222222222222",
+        metadata={"scene_name": scene_name, "sceneName": scene_name},
+    )
+
+    response = HubIntegrationService(test_store, fake_hub).sync_scene("default-site-a", force=True)
+
+    assert response.ok is True
+    assert response.items[0].status == "synced"
+    assert response.items[0].detail == "Hub Scene recreated after stale local mapping"
+    assert any(item[0] == "POST" and item[1] == "/scenes" for item in fake_hub.requests)
+    mapping = test_store.get_hub_mapping("scenario", "default-site-a", "scene")
+    assert mapping is not None
+    assert mapping.hubId != "22222222-2222-2222-2222-222222222222"
+    assert mapping.metadata["sceneSyncMode"] == "recreated_after_stale_mapping"
 
 
 def test_command_endpoint_records_command_without_mqtt():
@@ -186,6 +273,8 @@ def test_command_endpoint_records_command_without_mqtt():
         assert payload["payload"]["messageType"] == "command"
         assert payload["payload"]["command"] == "goto_pose"
         assert payload["payload"]["robotCode"] == "robot-001"
+        assert payload["payload"]["scene_name"].startswith("0616-default-site-a-")
+        assert not payload["payload"]["scene_name"].startswith("0616-default-site-a-v")
         assert payload["payload"]["taskId"].startswith("TASK-")
         assert payload["payload"]["requestId"] is None
         assert payload["payload"]["traceId"].startswith("TRACE-")
@@ -344,6 +433,7 @@ def test_hub_integration_status_exposes_mqtt_subscription(monkeypatch):
         payload = response.json()
         assert payload["status"] == "disabled"
         assert payload["mqttSubscription"]["topics"][0]["topic"] == "factory/dogs/+/result"
+        assert "scene_name" in payload["mqttSubscription"]["requiredPayloadFields"]
 
 
 def test_hub_sync_run_graph_creates_uuid_mappings(tmp_path):
@@ -802,6 +892,10 @@ def test_mqtt_contract_uses_dog_command_result_topics():
         assert payload["topicPattern"] == "factory/dogs/{robotCode}/{channel}"
         assert payload["command"]["topic"] == "factory/dogs/{robotCode}/command"
         assert payload["result"]["topic"] == "factory/dogs/{robotCode}/result"
+        assert "scene_name" in payload["command"]["required"]
+        assert "scene_name" in payload["result"]["required"]
+        assert "messageId" in payload["result"]["required"]
+        assert "sceneName" in payload["result"]["fields"]
 
 
 def test_scene_world_state_hub_compatibility_api(tmp_path, monkeypatch):

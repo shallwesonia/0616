@@ -286,7 +286,16 @@ export default function App() {
     setMap(nextMap);
     setDraftId(null);
     const hubStatus = response.hubSync.enabled ? response.hubSync.status : "skipped";
-    setStatus(`已发布配置 ${nextMap.configVersion}，Hub ${hubStatus}${response.hubSync.reason ? `：${response.hubSync.reason}` : ""}`);
+    const hubScene = response.hubSync.sceneName ? `，Scene ${response.hubSync.sceneName}` : "";
+    const sceneMode =
+      response.hubSync.sceneSyncMode === "reused_existing_no_update"
+        ? "，Hub Scene 已存在，v0.1 不更新"
+        : response.hubSync.sceneSyncMode === "recreated_after_stale_mapping"
+          ? "，Hub Scene 已重新注册并刷新映射"
+          : response.hubSync.sceneSyncMode === "created"
+            ? "，Hub Scene 已注册"
+            : "";
+    setStatus(`已发布配置 ${nextMap.configVersion}，Hub ${hubStatus}${hubScene}${sceneMode}${response.hubSync.reason ? `：${response.hubSync.reason}` : ""}`);
   }
 
   async function handleExport(exportType: string) {

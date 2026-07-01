@@ -7413,6 +7413,39 @@
             ],
             "title": "Reason"
           },
+          "sceneName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenename"
+          },
+          "hubSceneId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hubsceneid"
+          },
+          "sceneSyncMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenesyncmode"
+          },
           "scene": {
             "anyOf": [
               {

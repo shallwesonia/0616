@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 
 from .mqtt_bridge import PlatformMqttBridge
 from .mqtt_contract import MQTT_CONTRACT
-from .hub_client import HubClient, HubIntegrationService, hub_mqtt_subscription_info
+from .hub_client import HubClient, HubIntegrationService, hub_mqtt_subscription_info, scene_name_for_scenario
 from .schemas import (
     AgentDecision,
     BatchTaskCreate,
@@ -94,10 +94,22 @@ from .hub_compat import (
 
 store = create_store()
 bridge = PlatformMqttBridge(store)
+DEFAULT_SCENARIO_ID = "default-site-a"
 
 
 def hub_service() -> HubIntegrationService:
     return HubIntegrationService(store, HubClient.from_env())
+
+
+def current_scene_name(scenario_id: str = DEFAULT_SCENARIO_ID) -> str | None:
+    if hasattr(store, "get_scenario"):
+        scenario = store.get_scenario(scenario_id)
+        if scenario is not None:
+            return scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
+    if hasattr(store, "current_map"):
+        current_map = store.current_map()
+        return scene_name_for_scenario(scenario_id, current_map.configVersion)
+    return None
 
 
 def _audit_hub_map_publish(map_id: str, hub_sync: MapPublishHubSync) -> None:
@@ -110,15 +122,68 @@ def _audit_hub_map_publish(map_id: str, hub_sync: MapPublishHubSync) -> None:
         )
 
 
+def _scene_mapping_from_response(scenario_id: str, response: HubSyncResponse | None) -> HubIdMapping | None:
+    if response is None:
+        return None
+    for mapping in response.mappings:
+        if mapping.localType == "scenario" and mapping.localId == scenario_id and mapping.hubType == "scene":
+            return mapping
+    return None
+
+
+def broadcast_scene_update(scene_name: str | None, map_id: str, map_version: str) -> bool:
+    if not scene_name:
+        return False
+    topic = f"sim/{bridge.env}/{bridge.site_id}/broadcast/event"
+    timestamp = utc_now()
+    payload = {
+        "messageId": new_id("msg"),
+        "messageType": "event",
+        "schemaVersion": "1.0",
+        "timestamp": timestamp,
+        "scene_name": scene_name,
+        "env": bridge.env,
+        "siteId": bridge.site_id,
+        "sessionId": "session-local",
+        "correlationId": map_id,
+        "source": "platform-api",
+        "event": "scene.updated",
+        "payload": {
+            "eventType": "scene.updated",
+            "targetType": "map",
+            "targetId": map_id,
+            "severity": "info",
+            "eventData": {
+                "mapId": map_id,
+                "mapVersion": map_version,
+                "scene_name": scene_name,
+            },
+            "recoverable": False,
+        },
+    }
+    store.append_message(
+        MessageRecord(
+            messageId=payload["messageId"],
+            messageType="event",
+            source="platform-api",
+            topic=topic,
+            createdAt=timestamp,
+            payload=payload,
+        )
+    )
+    return bridge.publish(topic, payload, qos=1, retain=False)
+
+
 def sync_hub_after_map_publish(scenario_id: str, map_id: str) -> MapPublishHubSync:
     service = hub_service()
     status = service.status()
+    scene_name = current_scene_name(scenario_id)
     if not status.enabled:
-        hub_sync = MapPublishHubSync(enabled=False, status="skipped", reason="Hub sync is disabled")
+        hub_sync = MapPublishHubSync(enabled=False, status="skipped", reason="Hub sync is disabled", sceneName=scene_name)
         _audit_hub_map_publish(map_id, hub_sync)
         return hub_sync
     if status.status != "ok":
-        hub_sync = MapPublishHubSync(enabled=True, status="failed", reason=status.error or "Hub status is not ok")
+        hub_sync = MapPublishHubSync(enabled=True, status="failed", reason=status.error or "Hub status is not ok", sceneName=scene_name)
         _audit_hub_map_publish(map_id, hub_sync)
         return hub_sync
 
@@ -138,10 +203,14 @@ def sync_hub_after_map_publish(scenario_id: str, map_id: str) -> MapPublishHubSy
     elif not entities_response.ok:
         reason = entities_response.error or "Hub entity sync failed"
 
+    scene_mapping = _scene_mapping_from_response(scenario_id, scene_response)
     hub_sync = MapPublishHubSync(
         enabled=True,
         status=result_status,
         reason=reason,
+        sceneName=scene_name,
+        hubSceneId=scene_mapping.hubId if scene_mapping else None,
+        sceneSyncMode=(scene_mapping.metadata or {}).get("sceneSyncMode") if scene_mapping else None,
         scene=scene_response,
         entities=entities_response,
     )
@@ -355,7 +424,8 @@ def publish_map_draft(map_id: str, draft_id: str) -> MapPublishResponse:
     if published_result is None:
         raise HTTPException(status_code=404, detail="draft not found")
     published, target_sync = published_result
-    hub_sync = sync_hub_after_map_publish("default-site-a", published.id)
+    hub_sync = sync_hub_after_map_publish(DEFAULT_SCENARIO_ID, published.id)
+    broadcast_scene_update(hub_sync.sceneName, published.id, published.configVersion)
     return MapPublishResponse(map=published, targetSync=target_sync, hubSync=hub_sync)
 
 
@@ -665,6 +735,7 @@ def _issue_command(command: CommandCreate) -> CommandResponse:
         "schemaVersion": "1.0",
         "messageType": "command",
         "commandId": command_id,
+        "scene_name": current_scene_name(),
         "taskId": task_id,
         "requestId": request_id,
         "robotCode": robot_code,
@@ -723,6 +794,7 @@ def create_console_event(event: ConsoleEventCreate) -> ConsoleEventResponse:
         "messageType": "event",
         "schemaVersion": "1.0",
         "timestamp": utc_now(),
+        "scene_name": current_scene_name(),
         "env": "dev",
         "siteId": "site-a",
         "sessionId": "session-local",
@@ -768,6 +840,7 @@ def _broadcast_runtime_event(
         "messageType": "event",
         "schemaVersion": "1.0",
         "timestamp": timestamp,
+        "scene_name": current_scene_name(),
         "env": bridge.env,
         "siteId": bridge.site_id,
         "runId": run_id,

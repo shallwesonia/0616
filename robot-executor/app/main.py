@@ -53,6 +53,7 @@ class VirtualRobotExecutor:
         self.site_id = os.getenv("SITE_ID", "site-a")
         self.robot_code = os.getenv("ROBOT_CODE", os.getenv("ROBOT_ID", "robot-001"))
         self.robot_type = os.getenv("ROBOT_TYPE", "machine-dog")
+        self.scene_name: str | None = os.getenv("SCENE_NAME")
         self.host = os.getenv("MQTT_HOST", "localhost")
         self.port = int(os.getenv("MQTT_PORT", "1883"))
         self.client_id = os.getenv("MQTT_CLIENT_ID", f"virtual-dog-{self.robot_code}")
@@ -157,6 +158,7 @@ class VirtualRobotExecutor:
         request_id = command_payload.get("requestId")
         trace_id = command_payload.get("traceId") or protocol_id("TRACE")
         params = command_payload.get("params") or {}
+        self.remember_scene_name(command_payload)
 
         if command_payload.get("messageType") != "command" or command_payload.get("robotCode") != self.robot_code:
             self.publish_command_rejected(command_id, task_id, request_id, trace_id, "INVALID_TARGET_POSE", "invalid command payload")
@@ -600,6 +602,7 @@ class VirtualRobotExecutor:
             )
 
     def handle_broadcast_event(self, envelope: dict[str, Any]) -> None:
+        self.remember_scene_name(envelope)
         payload = envelope.get("payload", {})
         event_type = payload.get("eventType") or envelope.get("event")
         target_type = payload.get("targetType")
@@ -731,6 +734,9 @@ class VirtualRobotExecutor:
         return {
             "schemaVersion": "1.0",
             "messageType": "event",
+            "messageId": protocol_id("MSG"),
+            "scene_name": self.scene_name,
+            "sceneName": self.scene_name,
             "event": event_name,
             "eventId": protocol_id("EVT"),
             "commandId": command_id,
@@ -743,6 +749,11 @@ class VirtualRobotExecutor:
             "data": data,
             "error": error,
         }
+
+    def remember_scene_name(self, payload: dict[str, Any]) -> None:
+        scene_name = payload.get("scene_name") or payload.get("sceneName")
+        if scene_name:
+            self.scene_name = str(scene_name)
 
     @staticmethod
     def error(error_code: str, error_message: str, retryable: bool, source: str = "device") -> dict[str, Any]:

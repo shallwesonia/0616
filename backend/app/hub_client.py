@@ -32,6 +32,17 @@ def _hub_base_url() -> str:
     return os.getenv("HUB_BASE_URL", "http://127.0.0.1:8001/api/v1").rstrip("/")
 
 
+def scene_timestamp_from_version(site_map_version: str | None) -> str:
+    version = (site_map_version or "").strip()
+    if version.startswith("v") and len(version) > 1:
+        return version[1:]
+    return version or "unknown"
+
+
+def scene_name_for_scenario(scenario_id: str, site_map_version: str | None) -> str:
+    return f"0616-{scenario_id}-{scene_timestamp_from_version(site_map_version)}"
+
+
 def hub_mqtt_subscription_info() -> dict[str, Any]:
     public_host = os.getenv("PUBLIC_HOST", "localhost")
     mqtt_public_port = int(os.getenv("MQTT_PUBLIC_PORT", "18830"))
@@ -55,7 +66,7 @@ def hub_mqtt_subscription_info() -> dict[str, Any]:
             "ExecutorResult": ["command.accepted", "command.rejected", "task.succeeded", "task.failed", "action.succeeded", "action.failed"],
             "Alert": ["device.offline", "robot.offline", "path.blocked", "interface.timeout", "message.dropped"],
         },
-        "requiredPayloadFields": ["messageId", "messageType", "robotCode", "event", "timestamp"],
+        "requiredPayloadFields": ["messageId", "messageType", "robotCode", "event", "timestamp", "scene_name"],
         "recommendedCorrelationFields": ["runId", "taskId", "actionId", "commandId", "requestId", "traceId"],
     }
 
@@ -228,10 +239,7 @@ class HubIntegrationService:
 
     def _sync_scene(self, scenario: Any, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("scenario", scenario.scenarioId, "scene")
-        if existing and existing.hubId and not force:
-            items.append(self._item(existing, "reused"))
-            return existing
-        scene_name = f"0616-{scenario.scenarioId}-{scenario.siteMapVersion}" if force else f"0616-{scenario.scenarioId}"
+        scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion) if force else f"0616-{scenario.scenarioId}"
         payload = {
             "scene_name": scene_name,
             "description": f"0616 scenario: {scenario.name}",
@@ -241,26 +249,56 @@ class HubIntegrationService:
                 "externalId": scenario.scenarioId,
                 "siteMapId": scenario.siteMapId,
                 "siteMapVersion": scenario.siteMapVersion,
+                "scene_name": scene_name,
                 "robotCodes": scenario.robotCodes,
             },
         }
+        existing_scene = self._find_scene_by_name(scene_name, scenario.scenarioId)
+        if existing_scene is not None:
+            mapping = self._upsert_scene_mapping(
+                scenario,
+                str(existing_scene["id"]),
+                scene_name,
+                "reused_existing_no_update",
+            )
+            items.append(self._item(mapping, "reused", "Hub Scene already exists, v0.1 does not update map_config / metadata / description"))
+            return mapping
+
         try:
             obj = self.client.request("POST", "/scenes", payload)
         except HubClientError as exc:
             if exc.status_code != 409:
                 raise
-            obj = self._find_scene(scene_name, scenario.scenarioId)
+            obj = self._find_scene_by_name(scene_name, scenario.scenarioId)
             if obj is None:
                 raise
-        mapping = self._upsert(
+        previous_scene_name = None
+        if existing:
+            previous_scene_name = (existing.metadata or {}).get("scene_name") or (existing.metadata or {}).get("sceneName")
+        sync_mode = "recreated_after_stale_mapping" if existing and previous_scene_name == scene_name else "created"
+        mapping = self._upsert_scene_mapping(
+            scenario,
+            str(obj["id"]),
+            scene_name,
+            sync_mode,
+        )
+        detail = "Hub Scene recreated after stale local mapping" if sync_mode == "recreated_after_stale_mapping" else "Hub Scene registered"
+        items.append(self._item(mapping, "synced", detail))
+        return mapping
+
+    def _upsert_scene_mapping(self, scenario: Any, hub_id: str, scene_name: str, sync_mode: str) -> HubIdMapping:
+        return self._upsert(
             "scenario",
             scenario.scenarioId,
             "scene",
-            str(obj["id"]),
-            metadata={"sceneName": scene_name, "siteMapVersion": scenario.siteMapVersion},
+            hub_id,
+            metadata={
+                "sceneName": scene_name,
+                "scene_name": scene_name,
+                "sceneSyncMode": sync_mode,
+                "siteMapVersion": scenario.siteMapVersion,
+            },
         )
-        items.append(self._item(mapping, "synced"))
-        return mapping
 
     def _sync_entities_for_scene(self, hub_scene_id: str, items: list[HubSyncItem], force: bool = False) -> None:
         for robot in self.store.robots():
@@ -529,11 +567,23 @@ class HubIntegrationService:
                 raise
             return obj
 
-    def _find_scene(self, scene_name: str, external_id: str) -> dict[str, Any] | None:
+    def _find_scene_by_name(self, scene_name: str, external_id: str) -> dict[str, Any] | None:
+        try:
+            scene = self.client.request("GET", f"/scenes/by-name?scene_name={urllib.parse.quote(scene_name)}")
+        except HubClientError as exc:
+            if exc.status_code == 404:
+                return None
+            if exc.status_code not in {405, 422}:
+                raise
+        else:
+            return scene if isinstance(scene, dict) else None
+        return self._find_scene_from_list(scene_name, external_id)
+
+    def _find_scene_from_list(self, scene_name: str, external_id: str) -> dict[str, Any] | None:
         scenes = self.client.request("GET", "/scenes")
         for scene in scenes if isinstance(scenes, list) else []:
             metadata = scene.get("metadata") or {}
-            if scene.get("scene_name") == scene_name and metadata.get("externalId") == external_id:
+            if scene.get("scene_name") == scene_name and metadata.get("externalId") in {None, external_id}:
                 return scene
         return None
 

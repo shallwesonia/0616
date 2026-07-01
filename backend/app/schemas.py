@@ -1055,6 +1055,9 @@ class MapPublishHubSync(BaseModel):
     enabled: bool
     status: Literal["synced", "partial", "skipped", "failed"]
     reason: str | None = None
+    sceneName: str | None = None
+    hubSceneId: str | None = None
+    sceneSyncMode: str | None = None
     scene: HubSyncResponse | None = None
     entities: HubSyncResponse | None = None
 

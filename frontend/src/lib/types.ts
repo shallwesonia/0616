@@ -151,6 +151,9 @@ export interface MapPublishHubSync {
   enabled: boolean;
   status: "synced" | "partial" | "skipped" | "failed";
   reason?: string | null;
+  sceneName?: string | null;
+  hubSceneId?: string | null;
+  sceneSyncMode?: string | null;
   scene?: HubSyncResponse | null;
   entities?: HubSyncResponse | null;
 }
