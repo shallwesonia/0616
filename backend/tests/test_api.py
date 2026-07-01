@@ -10,7 +10,7 @@ import backend.app.main as main_module
 from backend.app.database_store import DatabaseStore
 from backend.app.hub_client import HubIntegrationService
 from backend.app.main import app
-from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, ActionCreate, SimulationRunCreate, SimulationTaskCreate, action_command_names
+from backend.app.schemas import ACTION_TARGET_TYPE_OPTIONS, ActionCreate, HubIntegrationStatus, SimulationRunCreate, SimulationTaskCreate, action_command_names
 
 
 class FakeHubClient:
@@ -21,6 +21,15 @@ class FakeHubClient:
     def __init__(self):
         self.counter = 0
         self.requests = []
+
+    def status(self):
+        return HubIntegrationStatus(
+            enabled=True,
+            baseUrl=self.base_url,
+            healthUrl=self.health_url,
+            status="ok",
+            mqttSubscription={},
+        )
 
     def request(self, method: str, path: str, payload=None):
         self.requests.append((method, path, payload))
@@ -110,6 +119,53 @@ def test_map_validation_reports_p0_errors():
         assert any("outside map bounds" in issue for issue in payload["issues"])
         assert any("references missing path node" in issue for issue in payload["issues"])
         assert any("disconnected" in issue for issue in payload["issues"])
+
+
+def test_publish_map_auto_syncs_hub_scene_and_entities(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-map-publish-hub.db').as_posix()}",
+        create_schema=True,
+    )
+    fake_hub = FakeHubClient()
+    monkeypatch.setattr(main_module, "store", test_store)
+    monkeypatch.setattr(main_module, "hub_service", lambda: HubIntegrationService(test_store, fake_hub))
+
+    with TestClient(app) as client:
+        current_map = client.get("/api/v1/maps/current").json()
+        current_map["objects"].append(
+            {
+                "id": "resource-auto-hub",
+                "type": "resourcePoint",
+                "name": "Auto Hub Resource",
+                "x": 1000,
+                "y": 360,
+                "width": 34,
+                "height": 34,
+                "color": "#fef3c7",
+            }
+        )
+        draft = client.post(f"/api/v1/maps/{current_map['id']}/drafts", json={"map": current_map})
+        assert draft.status_code == 200
+
+        response = client.post(f"/api/v1/maps/{current_map['id']}/drafts/{draft.json()['draftId']}/publish")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["map"]["objects"][-1]["id"] == "resource-auto-hub"
+    assert payload["targetSync"]["created"] >= 1
+    assert payload["hubSync"]["enabled"] is True
+    assert payload["hubSync"]["status"] == "synced"
+    assert payload["hubSync"]["scene"]["ok"] is True
+    assert payload["hubSync"]["entities"]["ok"] is True
+
+    scene_posts = [item for item in fake_hub.requests if item[0] == "POST" and item[1] == "/scenes"]
+    entity_posts = [item for item in fake_hub.requests if item[0] == "POST" and item[1] == "/entities"]
+    assert scene_posts
+    assert entity_posts
+    latest_scene_payload = scene_posts[0][2]
+    assert latest_scene_payload["metadata"]["siteMapVersion"] == payload["map"]["configVersion"]
+    assert latest_scene_payload["scene_name"] == f"0616-default-site-a-{payload['map']['configVersion']}"
+    assert any(item[2]["entity_name"] == "resource-auto-hub" for item in entity_posts)
 
 
 def test_command_endpoint_records_command_without_mqtt():

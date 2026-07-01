@@ -1049,3 +1049,17 @@ class HubSyncResponse(BaseModel):
     items: list[HubSyncItem] = Field(default_factory=list)
     mappings: list[HubIdMapping] = Field(default_factory=list)
     error: str | None = None
+
+
+class MapPublishHubSync(BaseModel):
+    enabled: bool
+    status: Literal["synced", "partial", "skipped", "failed"]
+    reason: str | None = None
+    scene: HubSyncResponse | None = None
+    entities: HubSyncResponse | None = None
+
+
+class MapPublishResponse(BaseModel):
+    map: SiteMap
+    targetSync: dict[str, int] = Field(default_factory=dict)
+    hubSync: MapPublishHubSync

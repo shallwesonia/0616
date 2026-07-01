@@ -455,7 +455,7 @@ class DatabaseStore(JsonStore):
             )
             return SiteMap.model_validate(map_with_default_path_groups(row.map_json)) if row else None
 
-    def publish_draft(self, draft_id: str) -> SiteMap | None:
+    def publish_draft(self, draft_id: str) -> tuple[SiteMap, dict[str, int]] | None:
         with self.database.session() as session:
             draft = session.scalar(
                 select(MapDraftRecord).where(
@@ -490,7 +490,7 @@ class DatabaseStore(JsonStore):
                 draft.map_id,
                 after={"draftId": draft_id, "configVersion": map_json["configVersion"], "targetSync": sync_summary},
             )
-            return SiteMap.model_validate(map_json)
+            return SiteMap.model_validate(map_json), sync_summary
 
     def storage_health(self) -> dict[str, Any]:
         health = self.database.health()

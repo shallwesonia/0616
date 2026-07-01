@@ -668,7 +668,7 @@ class JsonStore:
                 return message.get("createdAt")
         return None
 
-    def publish_draft(self, draft_id: str) -> SiteMap | None:
+    def publish_draft(self, draft_id: str) -> tuple[SiteMap, dict[str, int]] | None:
         state = self.read()
         draft = state["drafts"].get(draft_id)
         if not draft:
@@ -687,7 +687,7 @@ class JsonStore:
             after={"draftId": draft_id, "configVersion": next_map["configVersion"], "targetSync": sync_summary},
         )
         self.write(state)
-        return SiteMap.model_validate(next_map)
+        return SiteMap.model_validate(next_map), sync_summary
 
     def robots(self) -> list[RobotState]:
         return [RobotState.model_validate(item) for item in self.read()["robots"]]

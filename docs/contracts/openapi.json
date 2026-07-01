@@ -606,7 +606,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiteMap"
+                  "$ref": "#/components/schemas/MapPublishResponse"
                 }
               }
             }
@@ -7385,6 +7385,84 @@
           "color"
         ],
         "title": "MapObject"
+      },
+      "MapPublishHubSync": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "synced",
+              "partial",
+              "skipped",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HubSyncResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HubSyncResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "status"
+        ],
+        "title": "MapPublishHubSync"
+      },
+      "MapPublishResponse": {
+        "properties": {
+          "map": {
+            "$ref": "#/components/schemas/SiteMap"
+          },
+          "targetSync": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Targetsync"
+          },
+          "hubSync": {
+            "$ref": "#/components/schemas/MapPublishHubSync"
+          }
+        },
+        "type": "object",
+        "required": [
+          "map",
+          "hubSync"
+        ],
+        "title": "MapPublishResponse"
       },
       "MessageRecord": {
         "properties": {

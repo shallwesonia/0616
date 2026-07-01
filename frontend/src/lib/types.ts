@@ -147,6 +147,20 @@ export interface DraftResponse {
   map: SiteMap;
 }
 
+export interface MapPublishHubSync {
+  enabled: boolean;
+  status: "synced" | "partial" | "skipped" | "failed";
+  reason?: string | null;
+  scene?: HubSyncResponse | null;
+  entities?: HubSyncResponse | null;
+}
+
+export interface MapPublishResponse {
+  map: SiteMap;
+  targetSync: Record<string, number>;
+  hubSync: MapPublishHubSync;
+}
+
 export interface HealthResponse {
   status: string;
   time: string;

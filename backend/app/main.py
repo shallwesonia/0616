@@ -34,6 +34,8 @@ from .schemas import (
     CurrentState,
     HubIdMapping,
     HubIntegrationStatus,
+    MapPublishHubSync,
+    MapPublishResponse,
     HubSyncRequest,
     HubSyncResponse,
     MapImportResponse,
@@ -96,6 +98,55 @@ bridge = PlatformMqttBridge(store)
 
 def hub_service() -> HubIntegrationService:
     return HubIntegrationService(store, HubClient.from_env())
+
+
+def _audit_hub_map_publish(map_id: str, hub_sync: MapPublishHubSync) -> None:
+    if hasattr(store, "append_audit"):
+        store.append_audit(
+            "hub.map_publish.sync",
+            "map",
+            map_id,
+            after=hub_sync.model_dump(),
+        )
+
+
+def sync_hub_after_map_publish(scenario_id: str, map_id: str) -> MapPublishHubSync:
+    service = hub_service()
+    status = service.status()
+    if not status.enabled:
+        hub_sync = MapPublishHubSync(enabled=False, status="skipped", reason="Hub sync is disabled")
+        _audit_hub_map_publish(map_id, hub_sync)
+        return hub_sync
+    if status.status != "ok":
+        hub_sync = MapPublishHubSync(enabled=True, status="failed", reason=status.error or "Hub status is not ok")
+        _audit_hub_map_publish(map_id, hub_sync)
+        return hub_sync
+
+    scene_response = service.sync_scene(scenario_id, force=True)
+    entities_response = service.sync_entities(scenario_id, force=True) if scene_response.ok else None
+    if scene_response.ok and entities_response and entities_response.ok:
+        result_status = "synced"
+    elif scene_response.ok or (entities_response is not None and entities_response.ok):
+        result_status = "partial"
+    else:
+        result_status = "failed"
+    reason = None
+    if not scene_response.ok:
+        reason = scene_response.error or "Hub scene sync failed"
+    elif entities_response is None:
+        reason = "Hub entity sync skipped because scene sync failed"
+    elif not entities_response.ok:
+        reason = entities_response.error or "Hub entity sync failed"
+
+    hub_sync = MapPublishHubSync(
+        enabled=True,
+        status=result_status,
+        reason=reason,
+        scene=scene_response,
+        entities=entities_response,
+    )
+    _audit_hub_map_publish(map_id, hub_sync)
+    return hub_sync
 
 
 @asynccontextmanager
@@ -292,18 +343,20 @@ def validate_map_draft(map_id: str, draft_id: str) -> ValidationResponse:
     return ValidationResponse(ok=len(issues) == 0, issues=issues)
 
 
-@app.post("/api/v1/maps/{map_id}/drafts/{draft_id}/publish", response_model=SiteMap)
-def publish_map_draft(map_id: str, draft_id: str) -> SiteMap:
+@app.post("/api/v1/maps/{map_id}/drafts/{draft_id}/publish", response_model=MapPublishResponse)
+def publish_map_draft(map_id: str, draft_id: str) -> MapPublishResponse:
     draft = store.draft_map(draft_id)
     if draft is None or draft.id != map_id:
         raise HTTPException(status_code=404, detail="draft not found")
     issues = store.validate_map(draft)
     if issues:
         raise HTTPException(status_code=422, detail={"issues": issues})
-    published = store.publish_draft(draft_id)
-    if published is None:
+    published_result = store.publish_draft(draft_id)
+    if published_result is None:
         raise HTTPException(status_code=404, detail="draft not found")
-    return published
+    published, target_sync = published_result
+    hub_sync = sync_hub_after_map_publish("default-site-a", published.id)
+    return MapPublishResponse(map=published, targetSync=target_sync, hubSync=hub_sync)
 
 
 @app.post("/api/v1/imports/map", response_model=MapImportResponse)

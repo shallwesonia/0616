@@ -281,10 +281,12 @@ export default function App() {
 
   async function handlePublish() {
     const activeDraft = draftId ?? (await saveMapDraft(map)).draftId;
-    const nextMap = await publishDraft(map.id, activeDraft);
+    const response = await publishDraft(map.id, activeDraft);
+    const nextMap = response.map;
     setMap(nextMap);
     setDraftId(null);
-    setStatus(`已发布配置 ${nextMap.configVersion}`);
+    const hubStatus = response.hubSync.enabled ? response.hubSync.status : "skipped";
+    setStatus(`已发布配置 ${nextMap.configVersion}，Hub ${hubStatus}${response.hubSync.reason ? `：${response.hubSync.reason}` : ""}`);
   }
 
   async function handleExport(exportType: string) {

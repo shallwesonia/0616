@@ -231,7 +231,7 @@ class HubIntegrationService:
         if existing and existing.hubId and not force:
             items.append(self._item(existing, "reused"))
             return existing
-        scene_name = f"0616-{scenario.scenarioId}"
+        scene_name = f"0616-{scenario.scenarioId}-{scenario.siteMapVersion}" if force else f"0616-{scenario.scenarioId}"
         payload = {
             "scene_name": scene_name,
             "description": f"0616 scenario: {scenario.name}",
@@ -252,7 +252,13 @@ class HubIntegrationService:
             obj = self._find_scene(scene_name, scenario.scenarioId)
             if obj is None:
                 raise
-        mapping = self._upsert("scenario", scenario.scenarioId, "scene", str(obj["id"]), metadata={"sceneName": scene_name})
+        mapping = self._upsert(
+            "scenario",
+            scenario.scenarioId,
+            "scene",
+            str(obj["id"]),
+            metadata={"sceneName": scene_name, "siteMapVersion": scenario.siteMapVersion},
+        )
         items.append(self._item(mapping, "synced"))
         return mapping
 

@@ -11,6 +11,7 @@ import type {
   HubIdMapping,
   HubIntegrationStatus,
   HubSyncResponse,
+  MapPublishResponse,
   MessageReplayResponse,
   MessageRecord,
   MqttContract,
@@ -136,7 +137,7 @@ export function validateDraft(mapId: string, draftId: string) {
 }
 
 export function publishDraft(mapId: string, draftId: string) {
-  return request<SiteMap>(`/api/v1/maps/${mapId}/drafts/${draftId}/publish`, {
+  return request<MapPublishResponse>(`/api/v1/maps/${mapId}/drafts/${draftId}/publish`, {
     method: "POST"
   });
 }

@@ -96,9 +96,12 @@ def test_database_store_seeds_and_publishes_map(tmp_path):
     assert store.draft_map(draft_id).name == "Database map"
     assert store.validate_map(store.draft_map(draft_id)) == []
 
-    published = store.publish_draft(draft_id)
+    published_result = store.publish_draft(draft_id)
+    assert published_result is not None
+    published, target_sync = published_result
     assert published is not None
     assert published.name == "Database map"
+    assert target_sync["updated"] >= 1
     assert store.current_map().name == "Database map"
 
     health = store.storage_health()
@@ -120,9 +123,13 @@ def test_publish_draft_syncs_target_registry_to_current_map(tmp_path):
     updated_map.objects.append(new_station)
 
     draft_id = store.save_draft(updated_map)
-    published = store.publish_draft(draft_id)
+    published_result = store.publish_draft(draft_id)
+    assert published_result is not None
+    published, target_sync = published_result
 
     assert published is not None
+    assert target_sync["created"] >= 1
+    assert target_sync["inactivated"] >= 1
     expected_map_target_ids = {
         *{item.id for item in published.objects},
         *{edge.id for edge in published.pathEdges},
