@@ -442,6 +442,18 @@ export function getCurrentState(runId: string) {
   return request<CurrentState>(`/api/v1/current-states/${runId}`);
 }
 
+export function getHubCurrentState(runId?: string, sceneName?: string) {
+  const params = new URLSearchParams();
+  if (runId) {
+    params.set("runId", runId);
+  }
+  if (sceneName) {
+    params.set("sceneName", sceneName);
+  }
+  const query = params.toString();
+  return request<CurrentState>(`/api/v1/integrations/hub/current-state${query ? `?${query}` : ""}`);
+}
+
 export function getRunMessages(runId: string, category?: string) {
   const query = category ? `?category=${encodeURIComponent(category)}` : "";
   return request<MessageRecord[]>(`/api/v1/simulation-runs/${runId}/messages${query}`);

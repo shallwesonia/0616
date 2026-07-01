@@ -47,6 +47,7 @@ import {
   getActionTrace,
   getCurrentState,
   getExecutors,
+  getHubCurrentState,
   getHubIntegrationStatus,
   getHubMappings,
   getRobotConfigs,
@@ -416,11 +417,12 @@ export function SimulationDashboard() {
   }
 
   async function refreshRun(runId: string) {
+    const currentStateRequest = getHubCurrentState().catch(() => getCurrentState(runId));
     const [nextTasks, nextTaskChains, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
       getSimulationTasks(runId),
       getTaskChains(runId),
       getSimulationActions(runId),
-      getCurrentState(runId),
+      currentStateRequest,
       getRunMessages(runId),
       getRunObservations(runId),
       getRunMessageMetrics(runId),
@@ -1573,7 +1575,12 @@ export function SimulationDashboard() {
           <Panel className="min-h-[720px] overflow-hidden p-3">
             <div className="mb-3 flex items-center justify-between px-1">
               <PanelTitle icon={Route} title="二维 CurrentState" subtitle="只读场地、机器人、路径和异常" />
-              <Badge tone="blue">stateVersion {currentState?.stateVersion ?? "-"}</Badge>
+              <div className="flex items-center gap-2">
+                <Badge tone={currentState?.environmentState?.source === "hub" ? "green" : "blue"}>
+                  {currentState?.environmentState?.source === "hub" ? "Hub CurrentState" : "0616 Local Runtime"}
+                </Badge>
+                <Badge tone="blue">stateVersion {currentState?.stateVersion ?? "-"}</Badge>
+              </div>
             </div>
             <ReadOnlyMap map={selectedScenario?.map} robots={robots} activeEvents={currentState?.activeEvents ?? []} />
           </Panel>

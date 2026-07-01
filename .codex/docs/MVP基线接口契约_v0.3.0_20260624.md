@@ -87,6 +87,7 @@
 | Hub 状态 | `GET /api/v1/integrations/hub/status` |
 | Hub MQTT 订阅说明 | `GET /api/v1/integrations/hub/mqtt-subscription` |
 | ID 映射查询 | `GET /api/v1/integrations/hub/mappings` |
+| Hub CurrentState 读取 | `GET /api/v1/integrations/hub/current-state` |
 | Scene 同步 | `POST /api/v1/integrations/hub/sync/scenes/{scenario_id}` |
 | Entity 同步 | `POST /api/v1/integrations/hub/sync/entities/{scenario_id}` |
 | Run 全链路同步 | `POST /api/v1/integrations/hub/sync/runs/{run_id}` |
@@ -102,6 +103,9 @@
 - 0616 `traceId` 作为 `externalTraceId` 保存，Hub Trace 以 Hub UUID 为主。
 - `where` 是查询指令，Hub 不允许作为 Action 创建；同步时只写 Trace event，并在映射中标记 `skipped`。
 - Hub 不作为第二个指令源。0616 仍通过消息总成下发 MQTT command，Hub 只做世界状态、执行事实和 trace 数据承载。
+- Entity 同步只推送机器人与动态/交互目标：`robot`、`cargo`、`container`、`inspectionPoint`。
+- `station`、`zone`、`pathNode`、`pathEdge`、`pathGroup`、`mapObject` 以及 `metadata.source=map` 的纯地图几何不注册为 Hub Entity，避免地图对象污染运行态 Entity。
+- `GET /api/v1/integrations/hub/current-state` 从外部 Hub 读取当前 Scene 的 CurrentState，并转换为 0616 驾驶舱可用的 `CurrentState` 响应；找不到 Hub Scene、Entity 或 CurrentState 时返回错误，不在读取路径自动创建 Hub 对象。
 
 Docker Compose 默认参数：
 

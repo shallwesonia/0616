@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 
 from .mqtt_bridge import PlatformMqttBridge
 from .mqtt_contract import MQTT_CONTRACT
-from .hub_client import HubClient, HubIntegrationService, hub_mqtt_subscription_info, scene_name_for_scenario
+from .hub_client import HubClient, HubClientError, HubIntegrationService, hub_mqtt_subscription_info, scene_name_for_scenario
 from .schemas import (
     AgentDecision,
     BatchTaskCreate,
@@ -352,6 +352,18 @@ def list_hub_mappings(limit: int = 200) -> list[HubIdMapping]:
     if not hasattr(store, "list_hub_mappings"):
         raise HTTPException(status_code=501, detail="Hub ID mappings require database store")
     return store.list_hub_mappings(limit=limit)
+
+
+@app.get("/api/v1/integrations/hub/current-state", response_model=CurrentState)
+def get_hub_current_state(sceneName: str | None = None, runId: str | None = None) -> CurrentState:
+    scene_name = sceneName or current_scene_name()
+    if not scene_name:
+        raise HTTPException(status_code=404, detail="scene name not available")
+    try:
+        return hub_service().current_state(scene_name, DEFAULT_SCENARIO_ID, run_id=runId)
+    except HubClientError as exc:
+        status_code = 404 if exc.status_code == 404 else 502
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/integrations/hub/sync/scenes/{scenario_id}", response_model=HubSyncResponse)

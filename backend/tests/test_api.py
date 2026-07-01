@@ -23,6 +23,8 @@ class FakeHubClient:
         self.counter = 0
         self.requests = []
         self.scenes_by_name = {}
+        self.entities_by_scene = {}
+        self.current_states_by_scene = {}
 
     def status(self):
         return HubIntegrationStatus(
@@ -46,7 +48,17 @@ class FakeHubClient:
         if method == "GET" and path == "/scenes":
             return list(self.scenes_by_name.values())
         if method == "GET" and path.startswith("/entities"):
-            return []
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+            scene_id = query.get("scene_id", [""])[0]
+            return self.entities_by_scene.get(scene_id, [])
+        if method == "GET" and path.startswith("/current-state"):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+            scene_id = query.get("scene_id", [""])[0]
+            run_id = query.get("run_id", [None])[0]
+            states = self.current_states_by_scene.get(scene_id, [])
+            if run_id:
+                states = [state for state in states if state.get("run_id") == run_id]
+            return states
         if method == "GET" and path.startswith("/runs/"):
             return {"id": str(hub_id), "run_id": path.rsplit("/", 1)[-1]}
         if method == "POST" and path == "/scenes":
@@ -57,7 +69,9 @@ class FakeHubClient:
             self.scenes_by_name[scene_name] = scene
             return scene
         if method == "POST" and path == "/entities":
-            return {"id": str(hub_id), **payload}
+            entity = {"id": str(hub_id), **payload}
+            self.entities_by_scene.setdefault(payload["scene_id"], []).append(entity)
+            return entity
         if method == "POST" and path == "/runs":
             return {"id": str(hub_id), **payload}
         if method == "POST" and path == "/tasks":
@@ -186,7 +200,11 @@ def test_publish_map_auto_syncs_hub_scene_and_entities(tmp_path, monkeypatch):
     assert latest_scene_payload["metadata"]["siteMapVersion"] == payload["map"]["configVersion"]
     assert latest_scene_payload["scene_name"] == expected_scene_name
     assert latest_scene_payload["metadata"]["scene_name"] == expected_scene_name
-    assert any(item[2]["entity_name"] == "resource-auto-hub" for item in entity_posts)
+    entity_names = {item[2]["entity_name"] for item in entity_posts}
+    entity_types = {item[2]["entity_type"] for item in entity_posts}
+    assert {"robot-001", "robot-002", "robot-003", "cargo-001", "container-001", "inspection-001"}.issubset(entity_names)
+    assert "resource-auto-hub" not in entity_names
+    assert not {"station", "zone", "pathNode", "pathEdge", "pathGroup", "mapObject"}.intersection(entity_types)
 
     scene_messages = client.get("/api/v1/messages", params={"event": "scene.updated", "limit": 10})
     assert scene_messages.status_code == 200
@@ -253,6 +271,75 @@ def test_hub_scene_sync_recreates_stale_mapping(tmp_path):
     assert mapping is not None
     assert mapping.hubId != "22222222-2222-2222-2222-222222222222"
     assert mapping.metadata["sceneSyncMode"] == "recreated_after_stale_mapping"
+
+
+def test_hub_current_state_endpoint_reads_hub_robot_state(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-current-state.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000096"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    fake_hub = FakeHubClient()
+    scenario = test_store.get_scenario("default-site-a")
+    assert scenario is not None
+    scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
+    scene_id = "33333333-3333-3333-3333-333333333333"
+    robot_entity_id = "44444444-4444-4444-4444-444444444444"
+    fake_hub.scenes_by_name[scene_name] = {
+        "id": scene_id,
+        "scene_name": scene_name,
+        "description": "existing scene",
+        "map_config": {},
+        "metadata": {"externalId": scenario.scenarioId},
+    }
+    fake_hub.entities_by_scene[scene_id] = [
+        {
+            "id": robot_entity_id,
+            "scene_id": scene_id,
+            "entity_name": "robot-001",
+            "entity_type": "robot",
+            "properties": {"robotId": "robot-001", "robotType": "machine-dog", "state": "Idle", "x": 220, "y": 360},
+            "metadata": {"externalId": "robot-001"},
+        }
+    ]
+    fake_hub.current_states_by_scene[scene_id] = [
+        {
+            "id": "55555555-5555-5555-5555-555555555555",
+            "scene_id": scene_id,
+            "run_id": "default",
+            "state_version": 7,
+            "active_task_id": None,
+            "active_plan_id": None,
+            "active_action_id": None,
+            "last_observation_id": "66666666-6666-6666-6666-666666666666",
+            "last_observation_at": "2026-07-01T03:00:00Z",
+            "updated_at": "2026-07-01T03:00:01Z",
+            "entities": [
+                {
+                    "entity_id": robot_entity_id,
+                    "state_type": "position",
+                    "state_data": {"x": 760, "y": 420, "yaw": 1.57, "battery": 77},
+                    "last_observed_at": "2026-07-01T03:00:00Z",
+                    "updated_at": "2026-07-01T03:00:01Z",
+                }
+            ],
+        }
+    ]
+    monkeypatch.setattr(main_module, "store", test_store)
+    monkeypatch.setattr(main_module, "hub_service", lambda: HubIntegrationService(test_store, fake_hub))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/integrations/hub/current-state")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["environmentState"]["source"] == "hub"
+    assert payload["environmentState"]["sceneName"] == scene_name
+    assert payload["stateVersion"] == 7
+    assert payload["robotStates"][0]["robotId"] == "robot-001"
+    assert payload["robotStates"][0]["x"] == 760
+    assert payload["robotStates"][0]["battery"] == 77
 
 
 def test_command_endpoint_records_command_without_mqtt():

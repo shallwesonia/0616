@@ -74,7 +74,7 @@ Docker Compose 默认启动 3 个独立虚拟机器狗执行体：`robot-001`、
 - 虚拟机器狗执行体是独立服务，只依赖 MQTT 契约；当前默认部署 3 个执行体实例，后续可逐台替换为真实机器狗网关。
 - MQTT 对外接口按机器狗 command/result 标准：`factory/dogs/{robotCode}/command`、`factory/dogs/{robotCode}/result`。
 - 外部 Hub 兼容 REST 入口已对齐 Scene / World State Hub 原文接口：`GET /health`、`POST /api/v1/runs`、`POST /api/v1/scenes`、`POST /api/v1/entities`、`POST /api/v1/observations`、`POST /api/v1/executor-results`、`POST /api/v1/messages/query` 等，完整契约见 `.codex/docs/MVP基线接口契约_v0.3.0_20260624.md` 和 `docs/contracts/openapi.json`。
-- 0616 主动同步外部 Hub 的阶段 1-3 已接入：`/api/v1/integrations/hub/status`、`/api/v1/integrations/hub/sync/scenes/{scenarioId}`、`/api/v1/integrations/hub/sync/entities/{scenarioId}`、`/api/v1/integrations/hub/sync/runs/{runId}`。Docker Compose 默认 `HUB_SYNC_ENABLED=true`、`HUB_BASE_URL=http://host.docker.internal:8001/api/v1`。
+- 0616 主动同步外部 Hub 的阶段 1-3 已接入：`/api/v1/integrations/hub/status`、`/api/v1/integrations/hub/current-state`、`/api/v1/integrations/hub/sync/scenes/{scenarioId}`、`/api/v1/integrations/hub/sync/entities/{scenarioId}`、`/api/v1/integrations/hub/sync/runs/{runId}`。Docker Compose 默认 `HUB_SYNC_ENABLED=true`、`HUB_BASE_URL=http://host.docker.internal:8001/api/v1`。
 - 当前动作集支持 `goto_pose`、`stop`、`where`、`pick`、`place`、`load`、`unload`、`inspect`、`charge`、`wait`。
 - 动作耗时使用动作配置区间随机生成，默认 `goto_pose` 为 30-35 秒。
 

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .schemas import (
+    CurrentState,
     HubIdMapping,
     HubIntegrationStatus,
     HubSyncItem,
@@ -19,6 +20,10 @@ from .schemas import (
     SimulationTask,
     TargetRegistryItem,
 )
+
+
+SYNCABLE_TARGET_ENTITY_TYPES = {"cargo", "container", "inspectionPoint"}
+MAP_GEOMETRY_TARGET_TYPES = {"station", "zone", "pathNode", "pathEdge", "pathGroup", "mapObject"}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -237,6 +242,21 @@ class HubIntegrationService:
             return self._error("action", str(exc), items)
         return self._response("action", items)
 
+    def current_state(self, scene_name: str, scenario_id: str, run_id: str | None = None) -> CurrentState:
+        scene = self._find_scene_by_name(scene_name, scenario_id)
+        if scene is None:
+            raise HubClientError(404, f"Hub scene not found: {scene_name}")
+        scene_id = str(scene["id"])
+        states = self._fetch_hub_current_states(scene_id, run_id)
+        if not states and run_id:
+            states = self._fetch_hub_current_states(scene_id, None)
+        if not states:
+            raise HubClientError(404, f"Hub current state not found for scene: {scene_name}")
+        state = max(states, key=lambda item: str(item.get("updated_at") or ""))
+        entities_response = self.client.request("GET", f"/entities?scene_id={urllib.parse.quote(scene_id)}")
+        entities = entities_response if isinstance(entities_response, list) else []
+        return self._platform_current_state_from_hub(scene_name, scene_id, state, entities)
+
     def _sync_scene(self, scenario: Any, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("scenario", scenario.scenarioId, "scene")
         scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion) if force else f"0616-{scenario.scenarioId}"
@@ -304,7 +324,17 @@ class HubIntegrationService:
         for robot in self.store.robots():
             self._sync_robot_entity(hub_scene_id, robot, items, force=force)
         for target in self.store.list_targets(status="active") if hasattr(self.store, "list_targets") else []:
+            if not self._should_sync_target_entity(target):
+                continue
             self._sync_target_entity(hub_scene_id, target, items, force=force)
+
+    @staticmethod
+    def _should_sync_target_entity(target: TargetRegistryItem) -> bool:
+        if target.targetType in MAP_GEOMETRY_TARGET_TYPES:
+            return False
+        if (target.metadata or {}).get("source") == "map":
+            return False
+        return target.targetType in SYNCABLE_TARGET_ENTITY_TYPES
 
     def _sync_robot_entity(self, hub_scene_id: str, robot: Any, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("robot", robot.robotId, "entity")
@@ -594,6 +624,97 @@ class HubIntegrationService:
             if entity.get("entity_name") == entity_name and metadata.get("externalId") == external_id:
                 return entity
         return None
+
+    def _fetch_hub_current_states(self, scene_id: str, run_id: str | None) -> list[dict[str, Any]]:
+        query = {"scene_id": scene_id}
+        if run_id:
+            query["run_id"] = run_id
+        response = self.client.request("GET", f"/current-state?{urllib.parse.urlencode(query)}")
+        if isinstance(response, list):
+            return [item for item in response if isinstance(item, dict)]
+        if isinstance(response, dict):
+            return [response]
+        return []
+
+    @staticmethod
+    def _platform_current_state_from_hub(
+        scene_name: str,
+        scene_id: str,
+        state: dict[str, Any],
+        entities: list[dict[str, Any]],
+    ) -> CurrentState:
+        entities_by_id = {str(entity.get("id")): entity for entity in entities}
+        robots_by_code: dict[str, dict[str, Any]] = {}
+        for entity_state in state.get("entities", []):
+            if not isinstance(entity_state, dict):
+                continue
+            entity = entities_by_id.get(str(entity_state.get("entity_id")))
+            if not entity or entity.get("entity_type") != "robot":
+                continue
+            properties = entity.get("properties") if isinstance(entity.get("properties"), dict) else {}
+            robot_code = str(properties.get("robotId") or properties.get("robotCode") or entity.get("entity_name") or entity_state.get("entity_id"))
+            robot = robots_by_code.setdefault(
+                robot_code,
+                {
+                    "robotId": robot_code,
+                    "robotCode": robot_code,
+                    "robotType": properties.get("robotType") or "machine-dog",
+                    "state": properties.get("state") or "Idle",
+                    "x": float(properties.get("x") or 0),
+                    "y": float(properties.get("y") or 0),
+                    "z": float(properties.get("z") or 0),
+                    "yaw": float(properties.get("yaw") or 0),
+                    "battery": properties.get("battery"),
+                    "progress": int(properties.get("progress") or 0),
+                    "currentAction": properties.get("currentAction") or "Waiting",
+                    "updatedAt": str(properties.get("updatedAt") or state.get("updated_at") or ""),
+                    "hubEntityId": str(entity.get("id")),
+                    "hubStateTypes": [],
+                },
+            )
+            state_type = str(entity_state.get("state_type") or "")
+            state_data = entity_state.get("state_data") if isinstance(entity_state.get("state_data"), dict) else {}
+            robot["hubStateTypes"].append(state_type)
+            if state_type == "position":
+                for field in ("x", "y", "z", "yaw", "battery"):
+                    if field in state_data and state_data[field] is not None:
+                        robot[field] = state_data[field]
+            elif state_type in {"status", "heartbeat"}:
+                robot["state"] = state_data.get("state") or state_data.get("status") or robot["state"]
+                robot["currentAction"] = state_data.get("currentAction") or state_data.get("action") or robot["currentAction"]
+                robot["progress"] = int(state_data.get("progress") or robot["progress"] or 0)
+            elif state_type == "action_progress":
+                robot["progress"] = int(state_data.get("progress") or robot["progress"] or 0)
+                robot["currentAction"] = state_data.get("action") or robot["currentAction"]
+                if robot["progress"] < 100:
+                    robot["state"] = "Executing"
+            robot["updatedAt"] = str(entity_state.get("last_observed_at") or entity_state.get("updated_at") or robot["updatedAt"])
+
+        return CurrentState(
+            runId=str(state.get("run_id") or "hub-current-state"),
+            stateVersion=int(state.get("state_version") or 0),
+            taskState={
+                "activeTaskId": state.get("active_task_id"),
+                "activeActionId": state.get("active_action_id"),
+                "source": "hub",
+            },
+            activePlan={"planId": state.get("active_plan_id")} if state.get("active_plan_id") else None,
+            robotStates=list(robots_by_code.values()),
+            resourceStates={},
+            environmentState={
+                "source": "hub",
+                "currentStateSource": "hub",
+                "sceneName": scene_name,
+                "hubSceneId": scene_id,
+                "hubCurrentStateId": state.get("id"),
+                "hubRunId": state.get("run_id"),
+            },
+            pendingActions=[],
+            activeEvents=[],
+            lastObservationId=str(state.get("last_observation_id")) if state.get("last_observation_id") else None,
+            lastObservationAt=str(state.get("last_observation_at")) if state.get("last_observation_at") else None,
+            updatedAt=str(state.get("updated_at") or ""),
+        )
 
     def _mapping(self, local_type: str, local_id: str, hub_type: str) -> HubIdMapping | None:
         if not hasattr(self.store, "get_hub_mapping"):
