@@ -160,6 +160,16 @@ components:
           const: command
         commandId:
           type: string
+        runId:
+          type:
+            - string
+            - "null"
+          description: 0616 simulation run identifier. Commands created from a Run/Action must carry this value so Hub RunState, Task, Plan, Action and CurrentState stay under the same run.
+        run_id:
+          type:
+            - string
+            - "null"
+          description: Compatibility alias of runId for Hub-side snake_case consumers; value must match runId when present.
         taskId:
           type:
             - string
@@ -259,6 +269,16 @@ components:
           type:
             - string
             - "null"
+        runId:
+          type:
+            - string
+            - "null"
+          description: Echo command.runId while an action is executing. Hub MQTT adapter uses this as the CurrentState run scope.
+        run_id:
+          type:
+            - string
+            - "null"
+          description: Compatibility alias of runId for Hub-side snake_case consumers; value must match runId when present.
         taskId:
           type:
             - string

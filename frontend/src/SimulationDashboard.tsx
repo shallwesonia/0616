@@ -417,7 +417,7 @@ export function SimulationDashboard() {
   }
 
   async function refreshRun(runId: string) {
-    const currentStateRequest = getHubCurrentState().catch(() => getCurrentState(runId));
+    const currentStateRequest = getHubCurrentState(runId).catch(() => getCurrentState(runId));
     const [nextTasks, nextTaskChains, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
       getSimulationTasks(runId),
       getTaskChains(runId),

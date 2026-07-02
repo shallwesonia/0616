@@ -248,10 +248,9 @@ class HubIntegrationService:
             raise HubClientError(404, f"Hub scene not found: {scene_name}")
         scene_id = str(scene["id"])
         states = self._fetch_hub_current_states(scene_id, run_id)
-        if not states and run_id:
-            states = self._fetch_hub_current_states(scene_id, None)
         if not states:
-            raise HubClientError(404, f"Hub current state not found for scene: {scene_name}")
+            scope = f"run: {run_id}" if run_id else f"scene: {scene_name}"
+            raise HubClientError(404, f"Hub current state not found for {scope}")
         state = max(states, key=lambda item: str(item.get("updated_at") or ""))
         entities_response = self.client.request("GET", f"/entities?scene_id={urllib.parse.quote(scene_id)}")
         entities = entities_response if isinstance(entities_response, list) else []
@@ -259,7 +258,7 @@ class HubIntegrationService:
 
     def _sync_scene(self, scenario: Any, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("scenario", scenario.scenarioId, "scene")
-        scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion) if force else f"0616-{scenario.scenarioId}"
+        scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
         payload = {
             "scene_name": scene_name,
             "description": f"0616 scenario: {scenario.name}",
@@ -337,8 +336,9 @@ class HubIntegrationService:
         return target.targetType in SYNCABLE_TARGET_ENTITY_TYPES
 
     def _sync_robot_entity(self, hub_scene_id: str, robot: Any, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
-        existing = self._mapping("robot", robot.robotId, "entity")
-        if existing and existing.hubId and not force:
+        local_id = self._scene_entity_local_id(hub_scene_id, robot.robotId)
+        existing = self._mapping("robot", local_id, "entity")
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
             items.append(self._item(existing, "reused"))
             return existing
         payload = {
@@ -349,13 +349,14 @@ class HubIntegrationService:
             "metadata": {"sourcePlatform": "0616", "externalId": robot.robotId, "externalType": "robot"},
         }
         obj = self._create_or_find_entity(payload, robot.robotId)
-        mapping = self._upsert("robot", robot.robotId, "entity", str(obj["id"]), metadata={"entityName": robot.robotId})
+        mapping = self._upsert("robot", local_id, "entity", str(obj["id"]), external_id=robot.robotId, metadata={"entityName": robot.robotId, "sceneId": hub_scene_id})
         items.append(self._item(mapping, "synced"))
         return mapping
 
     def _sync_target_entity(self, hub_scene_id: str, target: TargetRegistryItem, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
-        existing = self._mapping("target", target.targetId, "entity")
-        if existing and existing.hubId and not force:
+        local_id = self._scene_entity_local_id(hub_scene_id, target.targetId)
+        existing = self._mapping("target", local_id, "entity")
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
             items.append(self._item(existing, "reused"))
             return existing
         payload = {
@@ -372,14 +373,15 @@ class HubIntegrationService:
             "metadata": {"sourcePlatform": "0616", "externalId": target.targetId, "externalType": "target"},
         }
         obj = self._create_or_find_entity(payload, target.targetId)
-        mapping = self._upsert("target", target.targetId, "entity", str(obj["id"]), metadata={"entityName": target.targetId})
+        mapping = self._upsert("target", local_id, "entity", str(obj["id"]), external_id=target.targetId, metadata={"entityName": target.targetId, "sceneId": hub_scene_id})
         items.append(self._item(mapping, "synced"))
         return mapping
 
     def _sync_run(self, run: SimulationRun, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("run", run.runId, "run")
-        if existing and existing.hubId and not force:
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
             items.append(self._item(existing, "reused"))
+            self._sync_run_status(run)
             return existing
         scenario = self.store.get_scenario(run.scenarioId)
         if scenario is None:
@@ -407,14 +409,11 @@ class HubIntegrationService:
             obj = self.client.request("GET", f"/runs/{urllib.parse.quote(run.runId)}")
         mapping = self._upsert("run", run.runId, "run", str(obj["id"]), metadata={"runId": run.runId})
         items.append(self._item(mapping, "synced"))
+        self._sync_run_status(run)
         return mapping
 
     def _sync_task(self, task: SimulationTask, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("task", task.taskId, "task")
-        if existing and existing.hubId and not force:
-            items.append(self._item(existing, "reused"))
-            self._sync_trace_for_task(task, str(existing.hubId), items, force=force)
-            return existing
         run = self.store.get_simulation_run(task.runId)
         if run is None:
             raise HubClientError(None, f"run not found: {task.runId}")
@@ -422,6 +421,11 @@ class HubIntegrationService:
         scene_mapping = self._mapping("scenario", run.scenarioId, "scene")
         if scene_mapping is None or not scene_mapping.hubId:
             raise HubClientError(None, "Hub scene mapping is missing")
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
+            items.append(self._item(existing, "reused"))
+            self._sync_task_status(task, existing, str(scene_mapping.hubId))
+            self._sync_trace_for_task(task, str(existing.hubId), items, force=force)
+            return existing
         payload = {
             "run_id": task.runId,
             "scene_id": scene_mapping.hubId,
@@ -441,18 +445,20 @@ class HubIntegrationService:
         obj = self.client.request("POST", "/tasks", payload)
         mapping = self._upsert("task", task.taskId, "task", str(obj["id"]), external_trace_id=task.traceId, metadata={"taskName": task.goal})
         items.append(self._item(mapping, "synced"))
+        self._sync_task_status(task, mapping, str(scene_mapping.hubId))
         self._sync_trace_for_task(task, str(mapping.hubId), items, force=force)
         return mapping
 
     def _sync_plan(self, plan: SimulationPlan, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("plan", plan.planId, "plan")
-        if existing and existing.hubId and not force:
-            items.append(self._item(existing, "reused"))
-            return existing
         task = self.store.get_task(plan.taskId)
         if task is None:
             raise HubClientError(None, f"task not found: {plan.taskId}")
         task_mapping = self._sync_task(task, items, force=force)
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
+            items.append(self._item(existing, "reused"))
+            self._sync_plan_status(plan, existing, task_mapping)
+            return existing
         payload = {
             "task_id": task_mapping.hubId,
             "version": plan.planVersion,
@@ -471,13 +477,14 @@ class HubIntegrationService:
         obj = self.client.request("POST", "/plans", payload)
         mapping = self._upsert("plan", plan.planId, "plan", str(obj["id"]), external_trace_id=plan.traceId, metadata={"version": plan.planVersion})
         items.append(self._item(mapping, "synced"))
+        self._sync_plan_status(plan, mapping, task_mapping)
         self._append_trace_event(plan.traceId, "plan.synced", mapping.hubId, "plan", {"planId": plan.planId})
         return mapping
 
     def _sync_action(self, action: SimulationAction, items: list[HubSyncItem], force: bool = False) -> HubIdMapping:
         existing = self._mapping("action", action.actionId, "action")
-        if existing and (existing.hubId or existing.syncStatus == "skipped") and not force:
-            items.append(self._item(existing, "reused" if existing.hubId else "skipped"))
+        if existing and existing.syncStatus == "skipped" and not force:
+            items.append(self._item(existing, "skipped"))
             return existing
         if action.command == "where":
             mapping = self._upsert(
@@ -500,15 +507,24 @@ class HubIntegrationService:
             raise HubClientError(None, "local task or plan not found")
         task_mapping = self._sync_task(task, items, force=force)
         plan_mapping = self._sync_plan(plan, items, force=force)
-        robot_mapping = self._mapping("robot", action.robotCode, "entity")
-        if robot_mapping is None or not robot_mapping.hubId:
-            run = self.store.get_simulation_run(action.runId)
-            if run is None:
-                raise HubClientError(None, f"run not found: {action.runId}")
+        if existing and existing.hubId and not force and self._mapping_is_live(existing):
+            items.append(self._item(existing, "reused"))
+            self._sync_action_status(action, existing, task_mapping, plan_mapping)
+            return existing
+        run = self.store.get_simulation_run(action.runId)
+        if run is None:
+            raise HubClientError(None, f"run not found: {action.runId}")
+        scene_mapping = self._mapping("scenario", run.scenarioId, "scene")
+        if scene_mapping is None or not scene_mapping.hubId:
             scenario = self.store.get_scenario(run.scenarioId)
             if scenario is None:
                 raise HubClientError(None, f"scenario not found: {run.scenarioId}")
             scene_mapping = self._sync_scene(scenario, items, force=force)
+        robot_mapping = self._mapping("robot", self._scene_entity_local_id(str(scene_mapping.hubId), action.robotCode), "entity")
+        if robot_mapping is None or not robot_mapping.hubId:
+            scenario = self.store.get_scenario(run.scenarioId)
+            if scenario is None:
+                raise HubClientError(None, f"scenario not found: {run.scenarioId}")
             robot = next((item for item in self.store.robots() if item.robotId == action.robotCode), None)
             if robot is None:
                 raise HubClientError(None, f"robot not found: {action.robotCode}")
@@ -535,6 +551,7 @@ class HubIntegrationService:
         obj = self.client.request("POST", "/actions", payload)
         mapping = self._upsert("action", action.actionId, "action", str(obj["id"]), external_trace_id=action.traceId, metadata={"command": action.command})
         items.append(self._item(mapping, "synced"))
+        self._sync_action_status(action, mapping, task_mapping, plan_mapping)
         self._append_trace_event(action.traceId, "action.synced", mapping.hubId, "action", {"actionId": action.actionId, "command": action.command})
         return mapping
 
@@ -624,6 +641,121 @@ class HubIntegrationService:
             if entity.get("entity_name") == entity_name and metadata.get("externalId") == external_id:
                 return entity
         return None
+
+    @staticmethod
+    def _scene_entity_local_id(hub_scene_id: str, local_id: str) -> str:
+        return f"{hub_scene_id}:{local_id}"
+
+    def _mapping_is_live(self, mapping: HubIdMapping) -> bool:
+        path = self._mapping_lookup_path(mapping)
+        if not path:
+            return bool(mapping.hubId)
+        try:
+            self.client.request("GET", path)
+            return True
+        except HubClientError as exc:
+            if exc.status_code == 404:
+                return False
+            if exc.status_code in {405, 422}:
+                return True
+            raise
+
+    @staticmethod
+    def _mapping_lookup_path(mapping: HubIdMapping) -> str | None:
+        if mapping.hubType == "run":
+            return f"/runs/{urllib.parse.quote(mapping.localId)}"
+        plural = {"task": "tasks", "plan": "plans", "action": "actions", "entity": "entities"}.get(mapping.hubType)
+        if plural and mapping.hubId:
+            return f"/{plural}/{urllib.parse.quote(str(mapping.hubId))}"
+        return None
+
+    def _sync_run_status(self, run: SimulationRun) -> None:
+        self._post_optional_status(
+            f"/runs/{urllib.parse.quote(run.runId)}/status",
+            {
+                "status": str(run.status).lower(),
+                "phase": "executing" if run.status == "Running" else "observing",
+                "metadata": {"sourcePlatform": "0616", "externalId": run.runId},
+            },
+        )
+
+    def _sync_task_status(self, task: SimulationTask, mapping: HubIdMapping, scene_id: str) -> None:
+        if not mapping.hubId:
+            return
+        self._post_optional_status(
+            f"/tasks/{urllib.parse.quote(str(mapping.hubId))}/status",
+            {
+                "run_id": task.runId,
+                "scene_id": scene_id,
+                "task_status": self._task_status(task.status),
+                "phase": "executing" if task.status == "Running" else "observing",
+                "status": "running" if task.status == "Running" else str(task.status).lower(),
+                "source": "0616-platform",
+                "metadata": {"sourcePlatform": "0616", "externalId": task.taskId, "externalTraceId": task.traceId},
+            },
+        )
+
+    def _sync_plan_status(self, plan: SimulationPlan, mapping: HubIdMapping, task_mapping: HubIdMapping) -> None:
+        if not mapping.hubId or not task_mapping.hubId:
+            return
+        task = self.store.get_task(plan.taskId)
+        if task is None:
+            return
+        run = self.store.get_simulation_run(plan.runId)
+        scene_mapping = self._mapping("scenario", run.scenarioId, "scene") if run else None
+        if scene_mapping is None or not scene_mapping.hubId:
+            return
+        self._post_optional_status(
+            f"/plans/{urllib.parse.quote(str(mapping.hubId))}/status",
+            {
+                "run_id": plan.runId,
+                "scene_id": str(scene_mapping.hubId),
+                "task_id": str(task_mapping.hubId),
+                "plan_id": str(mapping.hubId),
+                "plan_status": self._plan_status(plan.status),
+                "source": "0616-platform",
+                "metadata": {"sourcePlatform": "0616", "externalId": plan.planId, "externalTraceId": plan.traceId},
+            },
+        )
+
+    def _sync_action_status(
+        self,
+        action: SimulationAction,
+        mapping: HubIdMapping,
+        task_mapping: HubIdMapping | None = None,
+        plan_mapping: HubIdMapping | None = None,
+    ) -> None:
+        if not mapping.hubId:
+            return
+        task_mapping = task_mapping or (self._mapping("task", action.taskId, "task") if action.taskId else None)
+        plan_mapping = plan_mapping or (self._mapping("plan", action.planId, "plan") if action.planId else None)
+        if task_mapping is None or not task_mapping.hubId or plan_mapping is None or not plan_mapping.hubId:
+            return
+        run = self.store.get_simulation_run(action.runId)
+        scene_mapping = self._mapping("scenario", run.scenarioId, "scene") if run else None
+        if scene_mapping is None or not scene_mapping.hubId:
+            return
+        self._post_optional_status(
+            f"/actions/{urllib.parse.quote(str(mapping.hubId))}/status",
+            {
+                "run_id": action.runId,
+                "scene_id": str(scene_mapping.hubId),
+                "task_id": str(task_mapping.hubId),
+                "plan_id": str(plan_mapping.hubId),
+                "action_id": str(mapping.hubId),
+                "action_status": self._action_status(action.status),
+                "source": "0616-platform",
+                "metadata": {"sourcePlatform": "0616", "externalId": action.actionId, "externalTraceId": action.traceId},
+            },
+        )
+
+    def _post_optional_status(self, path: str, payload: dict[str, Any]) -> None:
+        try:
+            self.client.request("POST", path, payload)
+        except HubClientError as exc:
+            if exc.status_code in {404, 405, 422}:
+                return
+            raise
 
     def _fetch_hub_current_states(self, scene_id: str, run_id: str | None) -> list[dict[str, Any]]:
         query = {"scene_id": scene_id}

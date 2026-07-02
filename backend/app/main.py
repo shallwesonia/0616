@@ -742,12 +742,15 @@ def _issue_command(command: CommandCreate) -> CommandResponse:
         request_id = None
 
     trace_id = command.traceId or protocol_id("TRACE")
+    run_id = command.runId
     topic = f"factory/dogs/{robot_code}/command"
     payload = {
         "schemaVersion": "1.0",
         "messageType": "command",
         "commandId": command_id,
         "scene_name": current_scene_name(),
+        "runId": run_id,
+        "run_id": run_id,
         "taskId": task_id,
         "requestId": request_id,
         "robotCode": robot_code,
@@ -1152,6 +1155,7 @@ def create_action(request: ActionCreate | HubActionCreate = Body(...)) -> dict[s
             timeoutMs=action.timeoutMs,
             issuedBy="agent",
             operatorId=action_request.operatorId,
+            runId=action.runId,
             taskId=action.taskId,
             traceId=action.traceId,
         )
@@ -1315,6 +1319,7 @@ def schedule_simulation_run(run_id: str, request: RuleScheduleRequest) -> RuleSc
                 timeoutMs=created.timeoutMs,
                 issuedBy="agent",
                 operatorId=request.operatorId,
+                runId=created.runId,
                 taskId=created.taskId,
                 traceId=created.traceId,
             )

@@ -527,6 +527,7 @@ class ConsoleEventResponse(BaseModel):
 class CommandCreate(BaseModel):
     robotId: str | None = None
     robotCode: str | None = None
+    runId: str | None = Field(default=None, alias="run_id")
     commandType: str | None = None
     command: str | None = None
     target: dict[str, Any] = {}
@@ -540,6 +541,8 @@ class CommandCreate(BaseModel):
     requestId: str | None = None
     traceId: str | None = None
     idempotencyKey: str | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class CommandResponse(BaseModel):

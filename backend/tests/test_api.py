@@ -24,6 +24,12 @@ class FakeHubClient:
         self.requests = []
         self.scenes_by_name = {}
         self.entities_by_scene = {}
+        self.entities_by_id = {}
+        self.runs_by_id = {}
+        self.tasks_by_id = {}
+        self.plans_by_id = {}
+        self.actions_by_id = {}
+        self.status_updates = []
         self.current_states_by_scene = {}
 
     def status(self):
@@ -47,6 +53,11 @@ class FakeHubClient:
             raise HubClientError(404, "scene not found")
         if method == "GET" and path == "/scenes":
             return list(self.scenes_by_name.values())
+        if method == "GET" and path.startswith("/entities/"):
+            entity_id = path.rsplit("/", 1)[-1]
+            if entity_id in self.entities_by_id:
+                return self.entities_by_id[entity_id]
+            raise HubClientError(404, "entity not found")
         if method == "GET" and path.startswith("/entities"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
             scene_id = query.get("scene_id", [""])[0]
@@ -60,7 +71,25 @@ class FakeHubClient:
                 states = [state for state in states if state.get("run_id") == run_id]
             return states
         if method == "GET" and path.startswith("/runs/"):
-            return {"id": str(hub_id), "run_id": path.rsplit("/", 1)[-1]}
+            run_id = path.rsplit("/", 1)[-1]
+            if run_id in self.runs_by_id:
+                return self.runs_by_id[run_id]
+            raise HubClientError(404, "run not found")
+        if method == "GET" and path.startswith("/tasks/"):
+            task_id = path.rsplit("/", 1)[-1]
+            if task_id in self.tasks_by_id:
+                return self.tasks_by_id[task_id]
+            raise HubClientError(404, "task not found")
+        if method == "GET" and path.startswith("/plans/"):
+            plan_id = path.rsplit("/", 1)[-1]
+            if plan_id in self.plans_by_id:
+                return self.plans_by_id[plan_id]
+            raise HubClientError(404, "plan not found")
+        if method == "GET" and path.startswith("/actions/"):
+            action_id = path.rsplit("/", 1)[-1]
+            if action_id in self.actions_by_id:
+                return self.actions_by_id[action_id]
+            raise HubClientError(404, "action not found")
         if method == "POST" and path == "/scenes":
             scene_name = payload["scene_name"]
             if scene_name in self.scenes_by_name:
@@ -71,19 +100,67 @@ class FakeHubClient:
         if method == "POST" and path == "/entities":
             entity = {"id": str(hub_id), **payload}
             self.entities_by_scene.setdefault(payload["scene_id"], []).append(entity)
+            self.entities_by_id[str(entity["id"])] = entity
             return entity
         if method == "POST" and path == "/runs":
-            return {"id": str(hub_id), **payload}
+            run_id = payload["run_id"]
+            if run_id in self.runs_by_id:
+                return self.runs_by_id[run_id]
+            run = {"id": str(hub_id), **payload}
+            self.runs_by_id[run_id] = run
+            return run
+        if method == "POST" and path.startswith("/runs/") and path.endswith("/status"):
+            run_id = path.split("/")[2]
+            if run_id not in self.runs_by_id:
+                raise HubClientError(404, "run not found")
+            self.status_updates.append((method, path, payload))
+            return {"id": str(hub_id), "run_id": run_id, **payload}
         if method == "POST" and path == "/tasks":
-            return {"id": str(hub_id), **payload}
+            if payload["run_id"] not in self.runs_by_id:
+                raise HubClientError(404, "run not found")
+            task = {"id": str(hub_id), **payload}
+            self.tasks_by_id[str(task["id"])] = task
+            return task
+        if method == "POST" and path.startswith("/tasks/") and path.endswith("/status"):
+            task_id = path.split("/")[2]
+            if task_id not in self.tasks_by_id:
+                raise HubClientError(404, "task not found")
+            self.status_updates.append((method, path, payload))
+            return {"id": str(hub_id), "task_id": task_id, **payload}
         if method == "POST" and path == "/traces":
             return {"id": str(hub_id), **payload}
         if method == "POST" and path.startswith("/traces/") and path.endswith("/events"):
             return {"id": str(hub_id), "trace_id": path.split("/")[2], **payload}
         if method == "POST" and path == "/plans":
-            return {"id": str(hub_id), **payload}
+            if payload["task_id"] not in self.tasks_by_id:
+                raise HubClientError(404, "task not found")
+            plan = {"id": str(hub_id), **payload}
+            self.plans_by_id[str(plan["id"])] = plan
+            return plan
+        if method == "POST" and path.startswith("/plans/") and path.endswith("/status"):
+            plan_id = path.split("/")[2]
+            if plan_id not in self.plans_by_id:
+                raise HubClientError(404, "plan not found")
+            self.status_updates.append((method, path, payload))
+            return {"id": str(hub_id), "plan_id": plan_id, **payload}
         if method == "POST" and path == "/actions":
-            return {"id": str(hub_id), **payload}
+            if payload["task_id"] not in self.tasks_by_id:
+                raise HubClientError(404, "task not found")
+            if payload["plan_id"] not in self.plans_by_id:
+                raise HubClientError(404, "plan not found")
+            if payload["entity_id"] not in self.entities_by_id:
+                raise HubClientError(404, "entity not found")
+            if self.entities_by_id[payload["entity_id"]]["scene_id"] != self.tasks_by_id[payload["task_id"]]["scene_id"]:
+                raise HubClientError(400, "Entity does not belong to the task scene")
+            action = {"id": str(hub_id), **payload}
+            self.actions_by_id[str(action["id"])] = action
+            return action
+        if method == "POST" and path.startswith("/actions/") and path.endswith("/status"):
+            action_id = path.split("/")[2]
+            if action_id not in self.actions_by_id:
+                raise HubClientError(404, "action not found")
+            self.status_updates.append((method, path, payload))
+            return {"id": str(hub_id), "action_id": action_id, **payload}
         raise AssertionError(f"unexpected Hub request: {method} {path}")
 
 
@@ -342,6 +419,80 @@ def test_hub_current_state_endpoint_reads_hub_robot_state(tmp_path, monkeypatch)
     assert payload["robotStates"][0]["battery"] == 77
 
 
+def test_hub_current_state_endpoint_filters_by_requested_run_id(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-hub-current-state-run.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000097"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    fake_hub = FakeHubClient()
+    scenario = test_store.get_scenario("default-site-a")
+    assert scenario is not None
+    scene_name = scene_name_for_scenario(scenario.scenarioId, scenario.siteMapVersion)
+    scene_id = "33333333-3333-3333-3333-333333333337"
+    robot_entity_id = "44444444-4444-4444-4444-444444444447"
+    fake_hub.scenes_by_name[scene_name] = {
+        "id": scene_id,
+        "scene_name": scene_name,
+        "description": "existing scene",
+        "map_config": {},
+        "metadata": {"externalId": scenario.scenarioId},
+    }
+    fake_hub.entities_by_scene[scene_id] = [
+        {
+            "id": robot_entity_id,
+            "scene_id": scene_id,
+            "entity_name": "robot-001",
+            "entity_type": "robot",
+            "properties": {"robotId": "robot-001", "robotType": "machine-dog", "state": "Idle", "x": 220, "y": 360},
+            "metadata": {"externalId": "robot-001"},
+        }
+    ]
+    fake_hub.current_states_by_scene[scene_id] = [
+        {
+            "id": "55555555-5555-5555-5555-555555555557",
+            "scene_id": scene_id,
+            "run_id": "RUN-OLD",
+            "state_version": 1,
+            "updated_at": "2026-07-01T03:00:00Z",
+            "entities": [
+                {
+                    "entity_id": robot_entity_id,
+                    "state_type": "position",
+                    "state_data": {"x": 100, "y": 120, "yaw": 0, "battery": 90},
+                }
+            ],
+        },
+        {
+            "id": "55555555-5555-5555-5555-555555555558",
+            "scene_id": scene_id,
+            "run_id": "RUN-REAL",
+            "state_version": 9,
+            "updated_at": "2026-07-01T03:01:00Z",
+            "entities": [
+                {
+                    "entity_id": robot_entity_id,
+                    "state_type": "position",
+                    "state_data": {"x": 880, "y": 460, "yaw": 1.2, "battery": 66},
+                }
+            ],
+        },
+    ]
+    monkeypatch.setattr(main_module, "store", test_store)
+    monkeypatch.setattr(main_module, "hub_service", lambda: HubIntegrationService(test_store, fake_hub))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/integrations/hub/current-state", params={"runId": "RUN-REAL"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runId"] == "RUN-REAL"
+    assert payload["stateVersion"] == 9
+    assert payload["robotStates"][0]["x"] == 880
+    assert payload["robotStates"][0]["battery"] == 66
+
+
 def test_command_endpoint_records_command_without_mqtt():
     with TestClient(app) as client:
         response = client.post(
@@ -362,6 +513,8 @@ def test_command_endpoint_records_command_without_mqtt():
         assert payload["payload"]["robotCode"] == "robot-001"
         assert payload["payload"]["scene_name"].startswith("0616-default-site-a-")
         assert not payload["payload"]["scene_name"].startswith("0616-default-site-a-v")
+        assert payload["payload"]["runId"] is None
+        assert payload["payload"]["run_id"] is None
         assert payload["payload"]["taskId"].startswith("TASK-")
         assert payload["payload"]["requestId"] is None
         assert payload["payload"]["traceId"].startswith("TRACE-")
@@ -369,6 +522,21 @@ def test_command_endpoint_records_command_without_mqtt():
         trace = client.get(f"/api/v1/commands/{payload['commandId']}/trace")
         assert trace.status_code == 200
         assert trace.json()["messageCount"] >= 1
+
+        run_response = client.post(
+            "/api/v1/commands",
+            json={
+                "robotId": "robot-001",
+                "runId": "RUN-CMD-SMOKE",
+                "command": "where",
+                "params": {"queryMode": "full"},
+                "issuedBy": "test",
+            },
+        )
+        assert run_response.status_code == 200
+        run_payload = run_response.json()["payload"]
+        assert run_payload["runId"] == "RUN-CMD-SMOKE"
+        assert run_payload["run_id"] == "RUN-CMD-SMOKE"
 
 
 def test_robot_create_endpoint_adds_scenario_robot(tmp_path, monkeypatch):
@@ -559,6 +727,22 @@ def test_hub_sync_run_graph_creates_uuid_mappings(tmp_path):
     assert action is not None
 
     fake_hub = FakeHubClient()
+    stale_robot_entity_id = "99999999-9999-9999-9999-999999999999"
+    fake_hub.entities_by_id[stale_robot_entity_id] = {
+        "id": stale_robot_entity_id,
+        "scene_id": "88888888-8888-8888-8888-888888888888",
+        "entity_name": "robot-001",
+        "entity_type": "robot",
+        "properties": {"robotId": "robot-001"},
+        "metadata": {"externalId": "robot-001"},
+    }
+    test_store.upsert_hub_mapping(
+        local_type="robot",
+        local_id="robot-001",
+        hub_type="entity",
+        hub_id=stale_robot_entity_id,
+        metadata={"entityName": "robot-001", "sceneId": "88888888-8888-8888-8888-888888888888"},
+    )
     response = HubIntegrationService(test_store, fake_hub).sync_run_graph(run.runId)
     assert response.ok is True
     mapping_types = {(item.localType, item.hubType) for item in response.mappings}
@@ -577,10 +761,20 @@ def test_hub_sync_run_graph_creates_uuid_mappings(tmp_path):
     assert trace_mapping.externalTraceId == task.traceId
     assert trace_mapping.hubTraceId == trace_mapping.hubId
     action_payloads = [payload for method, path, payload in fake_hub.requests if method == "POST" and path == "/actions"]
+    task_payloads = [payload for method, path, payload in fake_hub.requests if method == "POST" and path == "/tasks"]
     assert action_payloads[0]["metadata"]["externalId"] == action.actionId
+    assert task_payloads[0]["run_id"] == run.runId
     assert UUID(action_payloads[0]["task_id"])
     assert UUID(action_payloads[0]["plan_id"])
     assert UUID(action_payloads[0]["entity_id"])
+    assert action_payloads[0]["entity_id"] != stale_robot_entity_id
+    post_paths = [path for method, path, _ in fake_hub.requests if method == "POST"]
+    assert post_paths.index("/runs") < post_paths.index("/tasks") < post_paths.index("/plans") < post_paths.index("/actions")
+    status_paths = [path for _, path, _ in fake_hub.status_updates]
+    assert any(path.startswith(f"/runs/{run.runId}/status") for path in status_paths)
+    assert any(path.startswith("/tasks/") and path.endswith("/status") for path in status_paths)
+    assert any(path.startswith("/plans/") and path.endswith("/status") for path in status_paths)
+    assert any(path.startswith("/actions/") and path.endswith("/status") for path in status_paths)
 
 
 def test_action_command_specs_expose_standard_params():

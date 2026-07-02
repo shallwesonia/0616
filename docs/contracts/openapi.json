@@ -5595,6 +5595,17 @@
             ],
             "title": "Robotcode"
           },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
           "commandType": {
             "anyOf": [
               {

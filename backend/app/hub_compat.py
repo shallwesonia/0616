@@ -464,6 +464,7 @@ def create_hub_action(
             timeoutMs=action.timeoutMs,
             issuedBy="hub-compat",
             operatorId=str(request.metadata.get("operatorId") or "hub-compat"),
+            runId=action.runId,
             taskId=action.taskId,
             traceId=action.traceId,
         )

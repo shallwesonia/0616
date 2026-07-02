@@ -70,6 +70,8 @@ class VirtualRobotExecutor:
         self.current_command_id: str | None = None
         self.current_task_id: str | None = None
         self.current_trace_id: str | None = None
+        self.current_run_id: str | None = None
+        self.command_context = threading.local()
         self.busy_lock = threading.Lock()
         self.cancel_current_task = threading.Event()
         self.offline_mode = threading.Event()
@@ -158,6 +160,7 @@ class VirtualRobotExecutor:
         request_id = command_payload.get("requestId")
         trace_id = command_payload.get("traceId") or protocol_id("TRACE")
         params = command_payload.get("params") or {}
+        self.command_context.run_id = self.extract_run_id(command_payload)
         self.remember_scene_name(command_payload)
 
         if command_payload.get("messageType") != "command" or command_payload.get("robotCode") != self.robot_code:
@@ -227,6 +230,7 @@ class VirtualRobotExecutor:
         self.current_command_id = command_id
         self.current_task_id = task_id
         self.current_trace_id = trace_id
+        self.current_run_id = self.extract_run_id_from_context()
         self.state = "Moving"
         try:
             planned_ms = self.planned_duration_ms("goto_pose", params)
@@ -394,6 +398,7 @@ class VirtualRobotExecutor:
             self.current_command_id = None
             self.current_task_id = None
             self.current_trace_id = None
+            self.current_run_id = None
             self.cancel_current_task.clear()
             self.busy_lock.release()
 
@@ -416,6 +421,7 @@ class VirtualRobotExecutor:
         self.current_command_id = command_id
         self.current_task_id = task_id
         self.current_trace_id = trace_id
+        self.current_run_id = self.extract_run_id_from_context()
         self.state = ACTION_STATES.get(action_name, "Executing")
         try:
             planned_ms = self.planned_duration_ms(action_name, params)
@@ -564,6 +570,7 @@ class VirtualRobotExecutor:
             self.current_command_id = None
             self.current_task_id = None
             self.current_trace_id = None
+            self.current_run_id = None
             self.cancel_current_task.clear()
             self.busy_lock.release()
 
@@ -731,12 +738,15 @@ class VirtualRobotExecutor:
         error: dict[str, Any] | None = None,
         source: str = "device",
     ) -> dict[str, Any]:
+        run_id = self.extract_run_id_from_context()
         return {
             "schemaVersion": "1.0",
             "messageType": "event",
             "messageId": protocol_id("MSG"),
             "scene_name": self.scene_name,
             "sceneName": self.scene_name,
+            "runId": run_id,
+            "run_id": run_id,
             "event": event_name,
             "eventId": protocol_id("EVT"),
             "commandId": command_id,
@@ -754,6 +764,15 @@ class VirtualRobotExecutor:
         scene_name = payload.get("scene_name") or payload.get("sceneName")
         if scene_name:
             self.scene_name = str(scene_name)
+
+    @staticmethod
+    def extract_run_id(payload: dict[str, Any]) -> str | None:
+        run_id = payload.get("runId") or payload.get("run_id")
+        return str(run_id) if run_id else None
+
+    def extract_run_id_from_context(self) -> str | None:
+        run_id = getattr(self.command_context, "run_id", None)
+        return str(run_id) if run_id else self.current_run_id
 
     @staticmethod
     def error(error_code: str, error_message: str, retryable: bool, source: str = "device") -> dict[str, Any]:
