@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from threading import RLock
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .schemas import (
+    ExecutorBindingStatus,
     ExecutorInstance,
     ExecutorInstanceCreate,
     RobotConfig,
@@ -945,6 +947,144 @@ class JsonStore:
             return []
         return self.query_messages(limit=limit, robot_code=executor.robotCode)
 
+    def executor_binding_statuses(
+        self,
+        expected_scene_name: str | None = None,
+        robot_code: str | None = None,
+        stale_after_seconds: int = 60,
+    ) -> list[ExecutorBindingStatus]:
+        executors = self.list_executors(robot_code=robot_code)
+        configs = [
+            config
+            for config in self.list_robot_configs()
+            if robot_code is None or config.robotCode == robot_code
+        ]
+        robots = [
+            robot
+            for robot in self.robots()
+            if robot_code is None or robot.robotId == robot_code
+        ]
+
+        robot_codes: list[str] = []
+        for code in [*(executor.robotCode for executor in executors), *(config.robotCode for config in configs), *(robot.robotId for robot in robots)]:
+            if code not in robot_codes:
+                robot_codes.append(code)
+        if robot_code and robot_code not in robot_codes:
+            robot_codes.append(robot_code)
+
+        statuses = [
+            self._executor_binding_status_for_robot(
+                code,
+                executors,
+                expected_scene_name,
+                stale_after_seconds,
+            )
+            for code in sorted(robot_codes)
+        ]
+        return statuses
+
+    def executor_binding_status(
+        self,
+        robot_code: str,
+        expected_scene_name: str | None = None,
+        stale_after_seconds: int = 60,
+    ) -> ExecutorBindingStatus | None:
+        statuses = self.executor_binding_statuses(
+            expected_scene_name=expected_scene_name,
+            robot_code=robot_code,
+            stale_after_seconds=stale_after_seconds,
+        )
+        return statuses[0] if statuses else None
+
+    def _executor_binding_status_for_robot(
+        self,
+        robot_code: str,
+        executors: list[ExecutorInstance],
+        expected_scene_name: str | None,
+        stale_after_seconds: int,
+    ) -> ExecutorBindingStatus:
+        executor = next((item for item in executors if item.robotCode == robot_code and item.status == "active"), None)
+        executor = executor or next((item for item in executors if item.robotCode == robot_code), None)
+        messages = self.query_messages(limit=200, robot_code=robot_code)
+        latest_pose_messages = self.query_messages(limit=1, robot_code=robot_code, event="pose.updated")
+        latest_command_messages = self.query_messages(limit=1, robot_code=robot_code, message_type="command")
+        latest_result_messages = self.query_messages(limit=1, robot_code=robot_code, message_type="event")
+        latest_pose = latest_pose_messages[0] if latest_pose_messages else None
+        latest_command = latest_command_messages[0] if latest_command_messages else None
+        latest_result = latest_result_messages[0] if latest_result_messages else None
+        latest_heartbeat = next(
+            (
+                message
+                for message in [latest_pose, *messages]
+                if message is not None
+                if message.messageType == "heartbeat" or self._message_event(message) == "pose.updated"
+            ),
+            None,
+        )
+        latest_pose_declares_scene = bool(latest_pose and self._payload_has_any(latest_pose.payload, "scene_name", "sceneName"))
+        scene_message = None
+        if not latest_pose_declares_scene:
+            scene_message = next(
+                (
+                    message
+                    for message in [latest_result, latest_command, *messages]
+                    if message is not None and self._payload_value(message.payload, "scene_name", "sceneName")
+                ),
+                None,
+            )
+        active_context_message = next(
+            (
+                message
+                for message in messages
+                if self._payload_has_any(message.payload, "runId", "run_id")
+            ),
+            None,
+        )
+
+        bound_scene_name = (
+            self._payload_value(latest_pose.payload, "scene_name", "sceneName")
+            if latest_pose_declares_scene and latest_pose is not None
+            else self._payload_value(scene_message.payload, "scene_name", "sceneName") if scene_message else None
+        )
+        active_run_id = self._payload_value(active_context_message.payload, "runId", "run_id") if active_context_message else None
+        connected = self._message_is_recent(latest_heartbeat, stale_after_seconds)
+        scene_matched = bool(bound_scene_name and expected_scene_name and bound_scene_name == expected_scene_name)
+
+        if not connected:
+            binding_status = "offline"
+        elif not bound_scene_name:
+            binding_status = "unbound"
+        elif expected_scene_name and bound_scene_name != expected_scene_name:
+            binding_status = "scene_mismatch"
+        elif active_run_id:
+            binding_status = "active_run"
+        else:
+            binding_status = "bound"
+
+        return ExecutorBindingStatus(
+            robotCode=robot_code,
+            connected=connected,
+            executorId=executor.executorId if executor else None,
+            executorType=executor.executorType if executor else None,
+            executorStatus=executor.status if executor else None,
+            mqttClientId=executor.mqttClientId if executor else None,
+            boundSceneName=str(bound_scene_name) if bound_scene_name else None,
+            expectedSceneName=expected_scene_name,
+            sceneMatched=scene_matched,
+            activeRunId=str(active_run_id) if active_run_id else None,
+            activeTaskId=self._active_payload_value(active_context_message, active_run_id, "taskId"),
+            activeActionId=self._active_payload_value(active_context_message, active_run_id, "actionId"),
+            activeCommandId=self._active_payload_value(active_context_message, active_run_id, "commandId", "correlationId"),
+            activeTraceId=self._active_payload_value(active_context_message, active_run_id, "traceId"),
+            lastHeartbeatAt=latest_heartbeat.createdAt if latest_heartbeat else executor.lastHeartbeatAt if executor else None,
+            lastPoseAt=latest_pose.createdAt if latest_pose else None,
+            lastCommandAt=latest_command.createdAt if latest_command else None,
+            lastResultAt=latest_result.createdAt if latest_result else None,
+            lastEvent=self._message_event(latest_result) if latest_result else None,
+            bindingStatus=binding_status,
+            status=binding_status,
+        )
+
     def messages(self, limit: int = 100) -> list[MessageRecord]:
         records = self.read()["messages"]
         return [MessageRecord.model_validate(item) for item in records[-limit:]][::-1]
@@ -1221,6 +1361,53 @@ class JsonStore:
             if inner_payload.get("severity") in {"error", "critical"}:
                 return message
         return None
+
+    @staticmethod
+    def _inner_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        inner_payload = payload.get("payload", {})
+        return inner_payload if isinstance(inner_payload, dict) else {}
+
+    @classmethod
+    def _payload_value(cls, payload: dict[str, Any], *keys: str) -> Any:
+        inner_payload = cls._inner_payload(payload)
+        for key in keys:
+            if key in payload:
+                return payload.get(key)
+            if key in inner_payload:
+                return inner_payload.get(key)
+        return None
+
+    @classmethod
+    def _payload_has_any(cls, payload: dict[str, Any], *keys: str) -> bool:
+        inner_payload = cls._inner_payload(payload)
+        return any(key in payload or key in inner_payload for key in keys)
+
+    @classmethod
+    def _message_event(cls, message: MessageRecord | None) -> str | None:
+        if message is None:
+            return None
+        event = cls._payload_value(message.payload, "event", "eventType")
+        return str(event) if event else None
+
+    @classmethod
+    def _active_payload_value(cls, message: MessageRecord | None, active_run_id: Any, *keys: str) -> str | None:
+        if not message or not active_run_id:
+            return None
+        value = cls._payload_value(message.payload, *keys)
+        return str(value) if value else None
+
+    @staticmethod
+    def _message_is_recent(message: MessageRecord | None, stale_after_seconds: int) -> bool:
+        if message is None:
+            return False
+        try:
+            created_at = datetime.fromisoformat(message.createdAt.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        return (now - created_at).total_seconds() <= stale_after_seconds
 
     @staticmethod
     def _message_matches(

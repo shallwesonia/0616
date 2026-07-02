@@ -24,6 +24,7 @@ from .schemas import (
     ConsoleEventCreate,
     ConsoleEventResponse,
     DraftResponse,
+    ExecutorBindingStatus,
     ExecutorInstance,
     ExecutorInstanceCreate,
     ExecutorLogResponse,
@@ -603,6 +604,25 @@ def list_executors(robotCode: str | None = None) -> list[ExecutorInstance]:
     if not hasattr(store, "list_executors"):
         raise HTTPException(status_code=501, detail="executor management is not available")
     return store.list_executors(robot_code=robotCode)
+
+
+@app.get("/api/v1/executor-bindings", response_model=list[ExecutorBindingStatus])
+def list_executor_bindings(robotCode: str | None = None) -> list[ExecutorBindingStatus]:
+    if not hasattr(store, "executor_binding_statuses"):
+        raise HTTPException(status_code=501, detail="executor binding status is not available")
+    return store.executor_binding_statuses(expected_scene_name=current_scene_name(), robot_code=robotCode)
+
+
+@app.get("/api/v1/executor-bindings/{robot_code}", response_model=ExecutorBindingStatus)
+def get_executor_binding(robot_code: str) -> ExecutorBindingStatus:
+    binding = (
+        store.executor_binding_status(robot_code, expected_scene_name=current_scene_name())
+        if hasattr(store, "executor_binding_status")
+        else None
+    )
+    if binding is None:
+        raise HTTPException(status_code=404, detail="executor binding status not found")
+    return binding
 
 
 @app.post("/api/v1/executors", response_model=ExecutorInstance)

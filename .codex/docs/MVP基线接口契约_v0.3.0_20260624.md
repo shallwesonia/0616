@@ -31,7 +31,7 @@
 | Target Registry | `GET /api/v1/targets`、`POST /api/v1/targets`、`PATCH /api/v1/targets/{target_id}` |
 | 机器人运行态 | `GET /api/v1/robots`、`POST /api/v1/robots`、`POST /api/v1/robots/{robot_id}/state` |
 | 机器人配置 | `GET /api/v1/robot-configs`、`POST /api/v1/robot-configs`、`PATCH /api/v1/robot-configs/{robot_code}` |
-| 执行体 | `GET /api/v1/executors`、`POST /api/v1/executors`、`POST /api/v1/executors/{executor_id}/stop` |
+| 执行体 | `GET /api/v1/executors`、`POST /api/v1/executors`、`GET /api/v1/executor-bindings`、`GET /api/v1/executor-bindings/{robot_code}`、`POST /api/v1/executors/{executor_id}/stop` |
 | 消息总成 | `GET /api/v1/messages`、`POST /api/v1/messages`、`POST /api/v1/commands` |
 | 仿真运行 | `POST /api/v1/simulation-runs`、`POST /api/v1/simulation-runs/{run_id}/start` |
 | Task/Plan/Action | `POST /api/v1/simulation-runs/{run_id}/tasks`、`POST /api/v1/simulation-runs/{run_id}/task-chains`、`POST /api/v1/tasks/{task_id}/plans`、`POST /api/v1/actions` |
@@ -39,6 +39,36 @@
 | Trace/State | `GET /api/v1/current-states/{run_id}`、`GET /api/v1/traces/{trace_id}/graph` |
 
 完整字段以 `docs/contracts/openapi.json` 为准。
+
+### 执行体绑定状态 API
+
+为便于 0616 与 Hub 联调时快速判断执行体是否已绑定当前场景，平台提供只读聚合接口：
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/executor-bindings` | 返回每个 `robotCode` 的执行体绑定状态，可用 `robotCode` 查询参数筛选 |
+| `GET /api/v1/executor-bindings/{robot_code}` | 返回单个机器人的执行体绑定状态 |
+
+响应核心字段：
+
+| 字段 | 说明 |
+|---|---|
+| `robotCode` | 机器人编码 |
+| `connected` | 最近 `pose.updated` 或 `heartbeat` 是否在有效窗口内 |
+| `boundSceneName` | 执行体最近 result/command 中携带的 `scene_name` 或 `sceneName` |
+| `expectedSceneName` | 0616 当前默认场景名 |
+| `sceneMatched` | `boundSceneName` 是否等于 `expectedSceneName` |
+| `activeRunId` | 最近执行中的 `runId/run_id`；执行体回到空闲并上报 `runId: null` 后清空 |
+| `lastHeartbeatAt` | 最近心跳或 `pose.updated` 时间 |
+| `lastPoseAt` | 最近 `pose.updated` 时间 |
+| `lastResultAt` | 最近 result event 时间 |
+| `bindingStatus` | `offline`、`unbound`、`scene_mismatch`、`active_run`、`bound` |
+
+约束：
+
+- 执行体只绑定 `scene_name`，不要求绑定 Hub UUID `scene_id`。
+- Hub UUID 仍由 0616 的 Hub mapping 负责转换。
+- `runId` 只表示 active run 上下文，运行结束或空闲上报后必须清空。
 
 ### Scene / World State Hub 兼容 API
 

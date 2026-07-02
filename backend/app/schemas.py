@@ -474,6 +474,30 @@ class ExecutorInstance(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExecutorBindingStatus(BaseModel):
+    robotCode: str
+    connected: bool
+    executorId: str | None = None
+    executorType: ExecutorType | None = None
+    executorStatus: ExecutorStatus | None = None
+    mqttClientId: str | None = None
+    boundSceneName: str | None = None
+    expectedSceneName: str | None = None
+    sceneMatched: bool = False
+    activeRunId: str | None = None
+    activeTaskId: str | None = None
+    activeActionId: str | None = None
+    activeCommandId: str | None = None
+    activeTraceId: str | None = None
+    lastHeartbeatAt: str | None = None
+    lastPoseAt: str | None = None
+    lastCommandAt: str | None = None
+    lastResultAt: str | None = None
+    lastEvent: str | None = None
+    bindingStatus: str
+    status: str
+
+
 class ExecutorTransitionResponse(BaseModel):
     executor: ExecutorInstance
     message: str

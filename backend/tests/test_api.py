@@ -1,6 +1,7 @@
 import os
 import urllib.parse
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 os.environ["MQTT_ENABLED"] = "false"
@@ -932,6 +933,120 @@ def test_robot_config_and_executor_management(tmp_path, monkeypatch):
         disabled = client.post("/api/v1/robot-configs/robot-020/disable")
         assert disabled.status_code == 200
         assert disabled.json()["enabled"] is False
+
+
+def test_executor_binding_status_reports_scene_and_active_run(tmp_path, monkeypatch):
+    test_store = DatabaseStore(
+        database_url=f"sqlite+pysqlite:///{(tmp_path / 'api-executor-bindings.db').as_posix()}",
+        workspace_id=UUID("00000000-0000-0000-0000-000000000092"),
+        state_path=tmp_path / "missing-state.json",
+        create_schema=True,
+    )
+    monkeypatch.setattr(main_module, "store", test_store)
+    scene_name = main_module.current_scene_name()
+    now = datetime.now(timezone.utc)
+
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/api/v1/robot-configs",
+            json={
+                "robotCode": "robot-021",
+                "robotName": "Robot 021",
+                "robotType": "machine-dog",
+                "initialPose": {"x": 320, "y": 280, "z": 0, "yaw": 0},
+                "createMode": "start_virtual_executor",
+            },
+        )
+        assert create_response.status_code == 200
+
+        command_message = client.post(
+            "/api/v1/messages",
+            json={
+                "messageId": "MSG-BIND-COMMAND-001",
+                "messageType": "command",
+                "source": "platform",
+                "topic": "factory/dogs/robot-021/command",
+                "createdAt": (now - timedelta(seconds=2)).isoformat(),
+                "payload": {
+                    "messageType": "command",
+                    "robotCode": "robot-021",
+                    "command": "goto_pose",
+                    "commandId": "CMD-BIND-001",
+                    "taskId": "TASK-BIND-001",
+                    "actionId": "ACT-BIND-001",
+                    "traceId": "TRACE-BIND-001",
+                    "runId": "RUN-BIND-001",
+                    "scene_name": scene_name,
+                },
+            },
+        )
+        assert command_message.status_code == 200
+        active_pose = client.post(
+            "/api/v1/messages",
+            json={
+                "messageId": "MSG-BIND-POSE-001",
+                "messageType": "event",
+                "source": "device",
+                "topic": "factory/dogs/robot-021/result",
+                "createdAt": (now - timedelta(seconds=1)).isoformat(),
+                "payload": {
+                    "messageType": "event",
+                    "event": "pose.updated",
+                    "robotCode": "robot-021",
+                    "commandId": "CMD-BIND-001",
+                    "taskId": "TASK-BIND-001",
+                    "actionId": "ACT-BIND-001",
+                    "traceId": "TRACE-BIND-001",
+                    "runId": "RUN-BIND-001",
+                    "scene_name": scene_name,
+                    "sceneName": scene_name,
+                    "data": {"x": 321, "y": 281},
+                },
+            },
+        )
+        assert active_pose.status_code == 200
+
+        active_binding = client.get("/api/v1/executor-bindings/robot-021")
+        assert active_binding.status_code == 200
+        payload = active_binding.json()
+        assert payload["connected"] is True
+        assert payload["bindingStatus"] == "active_run"
+        assert payload["boundSceneName"] == scene_name
+        assert payload["expectedSceneName"] == scene_name
+        assert payload["sceneMatched"] is True
+        assert payload["activeRunId"] == "RUN-BIND-001"
+        assert payload["activeCommandId"] == "CMD-BIND-001"
+
+        idle_pose = client.post(
+            "/api/v1/messages",
+            json={
+                "messageId": "MSG-BIND-POSE-002",
+                "messageType": "event",
+                "source": "device",
+                "topic": "factory/dogs/robot-021/result",
+                "createdAt": now.isoformat(),
+                "payload": {
+                    "messageType": "event",
+                    "event": "pose.updated",
+                    "robotCode": "robot-021",
+                    "commandId": None,
+                    "taskId": None,
+                    "actionId": None,
+                    "traceId": None,
+                    "runId": None,
+                    "scene_name": scene_name,
+                    "data": {"x": 322, "y": 282},
+                },
+            },
+        )
+        assert idle_pose.status_code == 200
+
+        idle_binding = client.get("/api/v1/executor-bindings", params={"robotCode": "robot-021"})
+        assert idle_binding.status_code == 200
+        payload = idle_binding.json()[0]
+        assert payload["connected"] is True
+        assert payload["bindingStatus"] == "bound"
+        assert payload["activeRunId"] is None
 
 
 def test_rule_scheduler_creates_agent_decision_and_action(tmp_path, monkeypatch):

@@ -1402,6 +1402,95 @@
         }
       }
     },
+    "/api/v1/executor-bindings": {
+      "get": {
+        "summary": "List Executor Bindings",
+        "operationId": "list_executor_bindings_api_v1_executor_bindings_get",
+        "parameters": [
+          {
+            "name": "robotCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Robotcode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecutorBindingStatus"
+                  },
+                  "title": "Response List Executor Bindings Api V1 Executor Bindings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/executor-bindings/{robot_code}": {
+      "get": {
+        "summary": "Get Executor Binding",
+        "operationId": "get_executor_binding_api_v1_executor_bindings__robot_code__get",
+        "parameters": [
+          {
+            "name": "robot_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Robot Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorBindingStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/executors/{executor_id}": {
       "get": {
         "summary": "Get Executor",
@@ -5902,6 +5991,229 @@
           "map"
         ],
         "title": "DraftResponse"
+      },
+      "ExecutorBindingStatus": {
+        "properties": {
+          "robotCode": {
+            "type": "string",
+            "title": "Robotcode"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "executorId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorid"
+          },
+          "executorType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "virtual",
+                  "real_gateway"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executortype"
+          },
+          "executorStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unbound",
+                  "binding",
+                  "active",
+                  "offline",
+                  "error",
+                  "stopped",
+                  "restarting",
+                  "replaced"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executorstatus"
+          },
+          "mqttClientId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mqttclientid"
+          },
+          "boundSceneName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundscenename"
+          },
+          "expectedSceneName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedscenename"
+          },
+          "sceneMatched": {
+            "type": "boolean",
+            "title": "Scenematched",
+            "default": false
+          },
+          "activeRunId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activerunid"
+          },
+          "activeTaskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activetaskid"
+          },
+          "activeActionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activeactionid"
+          },
+          "activeCommandId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activecommandid"
+          },
+          "activeTraceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activetraceid"
+          },
+          "lastHeartbeatAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastheartbeatat"
+          },
+          "lastPoseAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastposeat"
+          },
+          "lastCommandAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastcommandat"
+          },
+          "lastResultAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastresultat"
+          },
+          "lastEvent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastevent"
+          },
+          "bindingStatus": {
+            "type": "string",
+            "title": "Bindingstatus"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "robotCode",
+          "connected",
+          "bindingStatus",
+          "status"
+        ],
+        "title": "ExecutorBindingStatus"
       },
       "ExecutorInstance": {
         "properties": {

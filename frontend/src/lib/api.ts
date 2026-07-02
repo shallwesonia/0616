@@ -4,6 +4,7 @@ import type {
   ConnectionInfo,
   CurrentState,
   DraftResponse,
+  ExecutorBindingStatus,
   ExecutorInstance,
   BatchTaskResponse,
   ActionCommandSpec,
@@ -178,6 +179,11 @@ export function createRobotConfig(robot: {
 export function getExecutors(robotCode?: string) {
   const query = robotCode ? `?robotCode=${encodeURIComponent(robotCode)}` : "";
   return request<ExecutorInstance[]>(`/api/v1/executors${query}`);
+}
+
+export function getExecutorBindings(robotCode?: string) {
+  const query = robotCode ? `?robotCode=${encodeURIComponent(robotCode)}` : "";
+  return request<ExecutorBindingStatus[]>(`/api/v1/executor-bindings${query}`);
 }
 
 export function getMessages() {

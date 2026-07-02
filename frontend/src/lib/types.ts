@@ -133,6 +133,30 @@ export interface ExecutorInstance {
   metadata: Record<string, unknown>;
 }
 
+export interface ExecutorBindingStatus {
+  robotCode: string;
+  connected: boolean;
+  executorId?: string | null;
+  executorType?: "virtual" | "real_gateway" | null;
+  executorStatus?: ExecutorInstance["status"] | null;
+  mqttClientId?: string | null;
+  boundSceneName?: string | null;
+  expectedSceneName?: string | null;
+  sceneMatched: boolean;
+  activeRunId?: string | null;
+  activeTaskId?: string | null;
+  activeActionId?: string | null;
+  activeCommandId?: string | null;
+  activeTraceId?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastPoseAt?: string | null;
+  lastCommandAt?: string | null;
+  lastResultAt?: string | null;
+  lastEvent?: string | null;
+  bindingStatus: string;
+  status: string;
+}
+
 export interface MessageRecord {
   messageId: string;
   messageType: string;

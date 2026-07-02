@@ -46,6 +46,7 @@ import {
   getActionCommandSpecs,
   getActionTrace,
   getCurrentState,
+  getExecutorBindings,
   getExecutors,
   getHubCurrentState,
   getHubIntegrationStatus,
@@ -81,6 +82,7 @@ import {
 import type {
   ActionCommandSpec,
   CurrentState,
+  ExecutorBindingStatus,
   ExecutorInstance,
   HubIdMapping,
   HubIntegrationStatus,
@@ -157,6 +159,7 @@ export function SimulationDashboard() {
   const [targets, setTargets] = useState<TargetRegistryItem[]>([]);
   const [robotConfigs, setRobotConfigs] = useState<RobotConfig[]>([]);
   const [executors, setExecutors] = useState<ExecutorInstance[]>([]);
+  const [executorBindings, setExecutorBindings] = useState<ExecutorBindingStatus[]>([]);
   const [runs, setRuns] = useState<SimulationRun[]>([]);
   const [run, setRun] = useState<SimulationRun | null>(null);
   const [tasks, setTasks] = useState<SimulationTask[]>([]);
@@ -235,6 +238,9 @@ export function SimulationDashboard() {
     return Array.from(new Set(robotCodes.length ? robotCodes : ["robot-001"]));
   }, [robots, selectedScenario]);
   const effectiveRobotCode = selectedRobotCode || availableRobotCodes[0] || robots[0]?.robotId || "robot-001";
+  const executorBindingByRobotCode = useMemo(() => {
+    return new globalThis.Map(executorBindings.map((binding) => [binding.robotCode, binding]));
+  }, [executorBindings]);
   const filteredMessages = useMemo(() => {
     const categoryMessages =
       messageFilter === "All"
@@ -254,6 +260,7 @@ export function SimulationDashboard() {
     [filteredMessages, messages, selectedMessageId]
   );
   const selectedRobot = robots.find((robot) => robot.robotId === effectiveRobotCode) ?? robots[0] ?? null;
+  const selectedExecutorBinding = executorBindingByRobotCode.get(effectiveRobotCode) ?? null;
   const selectedExceptionOption = exceptionOptions.find((item) => item.value === exceptionType) ?? exceptionOptions[0];
   const visibleActionQueue = (taskActions.length ? taskActions : actions).filter(
     (action) => !effectiveRobotCode || action.robotCode === effectiveRobotCode
@@ -303,7 +310,18 @@ export function SimulationDashboard() {
   const latestHubMappings = hubMappings.slice(0, 5);
 
   async function bootstrap() {
-    const [nextScenarios, nextTemplates, nextSpecs, nextRuns, nextTargets, nextRobotConfigs, nextExecutors, nextHubStatus, nextHubMappings] = await Promise.all([
+    const [
+      nextScenarios,
+      nextTemplates,
+      nextSpecs,
+      nextRuns,
+      nextTargets,
+      nextRobotConfigs,
+      nextExecutors,
+      nextExecutorBindings,
+      nextHubStatus,
+      nextHubMappings
+    ] = await Promise.all([
       getScenarios(),
       getTaskTemplates(),
       getActionCommandSpecs(),
@@ -311,6 +329,7 @@ export function SimulationDashboard() {
       getTargets(),
       getRobotConfigs(),
       getExecutors(),
+      getExecutorBindings().catch(() => []),
       getHubIntegrationStatus().catch(() => null),
       getHubMappings().catch(() => [])
     ]);
@@ -320,6 +339,7 @@ export function SimulationDashboard() {
     setTargets(nextTargets);
     setRobotConfigs(nextRobotConfigs);
     setExecutors(nextExecutors);
+    setExecutorBindings(nextExecutorBindings);
     void refreshHubIntegration();
     setHubStatus(nextHubStatus);
     setHubMappings(nextHubMappings);
@@ -418,7 +438,19 @@ export function SimulationDashboard() {
 
   async function refreshRun(runId: string) {
     const currentStateRequest = getHubCurrentState(runId).catch(() => getCurrentState(runId));
-    const [nextTasks, nextTaskChains, nextActions, nextState, nextMessages, nextObservations, nextMetrics, nextTargets, nextRobotConfigs, nextExecutors] = await Promise.all([
+    const [
+      nextTasks,
+      nextTaskChains,
+      nextActions,
+      nextState,
+      nextMessages,
+      nextObservations,
+      nextMetrics,
+      nextTargets,
+      nextRobotConfigs,
+      nextExecutors,
+      nextExecutorBindings
+    ] = await Promise.all([
       getSimulationTasks(runId),
       getTaskChains(runId),
       getSimulationActions(runId),
@@ -428,7 +460,8 @@ export function SimulationDashboard() {
       getRunMessageMetrics(runId),
       getTargets(),
       getRobotConfigs(),
-      getExecutors()
+      getExecutors(),
+      getExecutorBindings().catch(() => [])
     ]);
     setTasks(nextTasks);
     setTaskChains(nextTaskChains);
@@ -440,6 +473,7 @@ export function SimulationDashboard() {
     setTargets(nextTargets);
     setRobotConfigs(nextRobotConfigs);
     setExecutors(nextExecutors);
+    setExecutorBindings(nextExecutorBindings);
     const nextTask = nextTasks.find((task) => task.taskId === selectedTaskId) ?? nextTasks[0] ?? null;
     const nextAction = nextActions.find((action) => action.actionId === selectedActionId)
       ?? nextActions.find((action) => action.taskId === nextTask?.taskId)
@@ -687,10 +721,16 @@ export function SimulationDashboard() {
         createMode: newRobotMode,
         executorEndpoint: newRobotMode === "bind_real_gateway" ? newRobotGateway.trim() || null : null
       });
-      const [nextScenarios, nextConfigs, nextExecutors] = await Promise.all([getScenarios(), getRobotConfigs(), getExecutors()]);
+      const [nextScenarios, nextConfigs, nextExecutors, nextExecutorBindings] = await Promise.all([
+        getScenarios(),
+        getRobotConfigs(),
+        getExecutors(),
+        getExecutorBindings().catch(() => [])
+      ]);
       setScenarios(nextScenarios);
       setRobotConfigs(nextConfigs);
       setExecutors(nextExecutors);
+      setExecutorBindings(nextExecutorBindings);
       setSelectedRobotCode(config.robotCode);
       setExceptionTarget(config.robotCode);
       setNewRobotCode(nextRobotCode([...availableRobotCodes, config.robotCode]));
@@ -1235,10 +1275,18 @@ export function SimulationDashboard() {
               <div className="mt-4 grid gap-2">
                 <div className="flex items-center justify-between text-xs text-neutral-500">
                   <span>执行体</span>
-                  <span>{executors.filter((executor) => executor.status === "active").length} active / {executors.length}</span>
+                  <span>{executorBindings.filter((binding) => binding.connected).length} connected / {executorBindings.length || executors.length}</span>
                 </div>
                 <CompactRow label="机器人配置" value={`${robotConfigs.filter((robot) => robot.enabled).length} enabled / ${robotConfigs.length}`} tone="blue" />
-                {executors.slice(0, 4).map((executor) => (
+                {executorBindings.slice(0, 4).map((binding) => (
+                  <CompactRow
+                    key={binding.robotCode}
+                    label={binding.robotCode}
+                    value={`${binding.bindingStatus} / ${binding.boundSceneName ?? "no scene"}`}
+                    tone={executorBindingTone(binding.bindingStatus)}
+                  />
+                ))}
+                {!executorBindings.length && executors.slice(0, 4).map((executor) => (
                   <CompactRow
                     key={executor.executorId}
                     label={executor.robotCode}
@@ -1693,6 +1741,7 @@ export function SimulationDashboard() {
               <div className="mt-4 space-y-3">
                 {robots.map((robot) => {
                   const isSelected = robot.robotId === effectiveRobotCode;
+                  const binding = executorBindingByRobotCode.get(robot.robotId);
                   return (
                     <button
                       key={robot.robotId}
@@ -1713,13 +1762,18 @@ export function SimulationDashboard() {
                           <Bot size={15} />
                           <span className="truncate">{robot.robotId}</span>
                         </div>
-                        <Badge tone={statusTone(robot.state)}>{robot.state}</Badge>
+                        <div className="flex items-center gap-1">
+                          <Badge tone={statusTone(robot.state)}>{robot.state}</Badge>
+                          <Badge tone={executorBindingTone(binding?.bindingStatus)}>{binding?.bindingStatus ?? "unbound"}</Badge>
+                        </div>
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-500">
                         <span>X {Math.round(robot.x)}</span>
                         <span>Y {Math.round(robot.y)}</span>
                         <span>进度 {robot.progress}%</span>
                         <span className="truncate">{robot.currentAction}</span>
+                        <span className="truncate">{binding?.boundSceneName ?? "no scene"}</span>
+                        <span className="truncate">{binding?.activeRunId ? `run ${binding.activeRunId}` : "run none"}</span>
                       </div>
                     </button>
                   );
@@ -1730,6 +1784,20 @@ export function SimulationDashboard() {
                     value={`${selectedRobot.robotId} / ${selectedRobot.state}`}
                     tone={statusTone(selectedRobot.state)}
                   />
+                )}
+                {selectedExecutorBinding && (
+                  <>
+                    <CompactRow
+                      label="执行体绑定"
+                      value={`${selectedExecutorBinding.boundSceneName ?? "no scene"} / ${selectedExecutorBinding.sceneMatched ? "matched" : "unmatched"}`}
+                      tone={executorBindingTone(selectedExecutorBinding.bindingStatus)}
+                    />
+                    <CompactRow
+                      label="Active Run"
+                      value={selectedExecutorBinding.activeRunId ?? "none"}
+                      tone={selectedExecutorBinding.activeRunId ? "blue" : "neutral"}
+                    />
+                  </>
                 )}
                 <CompactRow
                   label="当前任务"
@@ -2648,6 +2716,22 @@ function statusTone(value: string): "neutral" | "blue" | "green" | "amber" | "re
   }
   if (["Command", "Interface", "AgentDecision"].includes(value)) {
     return "blue";
+  }
+  return "neutral";
+}
+
+function executorBindingTone(value?: string | null): "neutral" | "blue" | "green" | "amber" | "red" {
+  if (value === "bound") {
+    return "green";
+  }
+  if (value === "active_run") {
+    return "blue";
+  }
+  if (value === "scene_mismatch" || value === "offline") {
+    return "red";
+  }
+  if (value === "unbound") {
+    return "amber";
   }
   return "neutral";
 }
